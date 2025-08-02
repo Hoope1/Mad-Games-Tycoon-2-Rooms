@@ -16,7 +16,7 @@ Maximale Genauigkeit durch:
 
 - Multi-Objective-Ziel mit gestaffelten Distanz-Boni, Prioritäten, Kompaktheit, Symmetrie
 
-- 8 Türpositionen (4 Seitenmittel + 4 Ecken) je Raum
+- Türanbindung über explizite Gangfelder
 
 - Präzisions-Modus (Portfolio-Search, höhere Probing-Stufen)
 
@@ -76,7 +76,7 @@ TOTAL_AREA = GRID_W * GRID_H  # Gesamtfläche
 
 # Vertikaler Eingangsstamm (Hauptkorridor)
 
-ENTRANCE_X1, ENTRANCE_W = 55, 4
+ENTRANCE_X1, ENTRANCE_W = 56, 4
 
 ENTRANCE_X2 = ENTRANCE_X1 + ENTRANCE_W
 
@@ -475,37 +475,99 @@ class CPSolution:
 
 def add_door_placement_constraints(
     model: cp_model.CpModel,
+    x_vars: List[IntVar],
+    y_vars: List[IntVar],
+    w_vars: List[IntVar],
+    h_vars: List[IntVar],
     doorx: List[IntVar],
     doory: List[IntVar],
     z: Dict[int, BoolVar],
     L: IntVar,
 ) -> None:
-    """Fügt Türplatzierungs- und Cluster-Constraints hinzu (sauber kanalisiert)."""
+    """Fügt Tür- und Gang-Constraints hinzu."""
 
-    # Booleans: Tür auf Vertikalkorridor vs. auf Band yb
     d_vert: List[BoolVar] = [model.NewBoolVar(f"dvert_{r}") for r in range(R)]
     d_band: List[List[BoolVar]] = [
         [model.NewBoolVar(f"d_{r}_{yb}") for yb in YCAND] for r in range(R)
     ]
 
-    # Regele: Wenn vertikal, dann (x in [X1,X2-1]) und (y < L)
     for r in range(R):
         model.Add(doorx[r] >= ENTRANCE_X1).OnlyEnforceIf(d_vert[r])
-        model.Add(doorx[r] <= ENTRANCE_X2 - 1).OnlyEnforceIf(d_vert[r])
+        model.Add(doorx[r] < ENTRANCE_X2).OnlyEnforceIf(d_vert[r])
         model.Add(doory[r] < L).OnlyEnforceIf(d_vert[r])
 
-    # Regele: Wenn auf Band (r,yb), dann y in [yb, yb+3] und Band muss aktiv sein
+        attach_left = model.NewBoolVar(f"attach_left_{r}")
+        attach_right = model.NewBoolVar(f"attach_right_{r}")
+
+        model.Add(x_vars[r] + w_vars[r] == doorx[r]).OnlyEnforceIf(attach_left)
+        model.Add(y_vars[r] <= doory[r]).OnlyEnforceIf(attach_left)
+        model.Add(doory[r] < y_vars[r] + h_vars[r]).OnlyEnforceIf(attach_left)
+
+        model.Add(x_vars[r] == doorx[r] + 1).OnlyEnforceIf(attach_right)
+        model.Add(y_vars[r] <= doory[r]).OnlyEnforceIf(attach_right)
+        model.Add(doory[r] < y_vars[r] + h_vars[r]).OnlyEnforceIf(attach_right)
+
+        model.AddImplication(attach_left, d_vert[r])
+        model.AddImplication(attach_right, d_vert[r])
+        model.AddBoolOr([attach_left, attach_right]).OnlyEnforceIf(d_vert[r])
+
     for r in range(R):
         for yb in YCAND:
+            model.Add(d_band[r][yb] <= z[yb])
             model.Add(doory[r] >= yb).OnlyEnforceIf([d_band[r][yb], z[yb]])
             model.Add(doory[r] <= yb + 3).OnlyEnforceIf([d_band[r][yb], z[yb]])
-            # Kein "OnlyEnforceIf(d_band<=z)" nötig, die folgende Exklusivität reicht
 
-    # Exakte Zuordnung: genau eins von (vertikal) oder (eines der Bänder)
+            attach_top = model.NewBoolVar(f"attach_top_{r}_{yb}")
+            attach_bot = model.NewBoolVar(f"attach_bot_{r}_{yb}")
+
+            model.Add(y_vars[r] + h_vars[r] == doory[r]).OnlyEnforceIf(attach_top)
+            model.Add(x_vars[r] <= doorx[r]).OnlyEnforceIf(attach_top)
+            model.Add(doorx[r] < x_vars[r] + w_vars[r]).OnlyEnforceIf(attach_top)
+
+            model.Add(y_vars[r] == doory[r] + 1).OnlyEnforceIf(attach_bot)
+            model.Add(x_vars[r] <= doorx[r]).OnlyEnforceIf(attach_bot)
+            model.Add(doorx[r] < x_vars[r] + w_vars[r]).OnlyEnforceIf(attach_bot)
+
+            model.AddImplication(attach_top, d_band[r][yb])
+            model.AddImplication(attach_bot, d_band[r][yb])
+            model.AddBoolOr([attach_top, attach_bot]).OnlyEnforceIf(d_band[r][yb])
+
     for r in range(R):
         model.Add(sum(d_band[r][yb] for yb in YCAND) + d_vert[r] == 1)
 
-    # -------- Vertikaler Korridor: Tür-Cluster begrenzen --------
+    for r in range(R):
+        intersects_vert = model.NewBoolVar(f"intersects_vert_{r}")
+        model.Add(y_vars[r] <= L - 1).OnlyEnforceIf(intersects_vert)
+        model.Add(y_vars[r] >= L).OnlyEnforceIf(intersects_vert.Not())
+
+        left_of = model.NewBoolVar(f"left_of_vert_{r}")
+        right_of = model.NewBoolVar(f"right_of_vert_{r}")
+
+        model.Add(x_vars[r] + w_vars[r] <= ENTRANCE_X1).OnlyEnforceIf(left_of)
+        model.Add(x_vars[r] >= ENTRANCE_X2).OnlyEnforceIf(right_of)
+
+        model.AddBoolOr([left_of, right_of, intersects_vert.Not()])
+
+    for r in range(R):
+        for yb in YCAND:
+            top = model.NewBoolVar(f"top_{r}_{yb}")
+            bot = model.NewBoolVar(f"bot_{r}_{yb}")
+            intersects = model.NewBoolVar(f"intersects_{r}_{yb}")
+
+            model.Add(y_vars[r] + h_vars[r] <= yb).OnlyEnforceIf(top)
+            model.Add(y_vars[r] + h_vars[r] >= yb + 1).OnlyEnforceIf(top.Not())
+
+            model.Add(y_vars[r] >= yb + 4).OnlyEnforceIf(bot)
+            model.Add(y_vars[r] <= yb + 3).OnlyEnforceIf(bot.Not())
+
+            model.AddBoolOr([top, bot, intersects])
+            model.AddImplication(intersects, top.Not())
+            model.AddImplication(intersects, bot.Not())
+            model.AddImplication(top, intersects.Not())
+            model.AddImplication(bot, intersects.Not())
+
+            model.AddBoolOr([top, bot, z[yb].Not(), intersects.Not()])
+
     for ty in range(ENTRANCE_MAX_LEN):
         row_active = model.NewBoolVar(f"row_active_{ty}")
         model.Add(L > ty).OnlyEnforceIf(row_active)
@@ -516,7 +578,6 @@ def add_door_placement_constraints(
             indicators: List[BoolVar] = []
 
             for r in range(R):
-                # same_pos gilt nur, wenn (1) vertikaler Modus aktiv und (2) diese Zeile aktiv
                 same_pos = model.NewBoolVar(f"v_same_pos_{r}_{tx}_{ty}")
                 model.Add(doorx[r] == tx).OnlyEnforceIf(
                     [same_pos, d_vert[r], row_active]
@@ -524,15 +585,12 @@ def add_door_placement_constraints(
                 model.Add(doory[r] == ty).OnlyEnforceIf(
                     [same_pos, d_vert[r], row_active]
                 )
-                # WICHTIG: KEINE '!= ...' Regeln für same_pos.Not()!
                 indicators.append(same_pos)
 
-            # Zählen nur, wenn Zeile aktiv; sonst 0
             model.Add(v_door_count == sum(indicators)).OnlyEnforceIf(row_active)
             model.Add(v_door_count == 0).OnlyEnforceIf(row_active.Not())
             model.Add(v_door_count <= DOOR_CLUSTER_LIMIT).OnlyEnforceIf(row_active)
 
-    # -------- Horizontale Bänder: Tür-Cluster begrenzen --------
     for yb in YCAND:
         band_active = z[yb]
         for ty in range(yb, yb + 4):
@@ -541,7 +599,6 @@ def add_door_placement_constraints(
                 indicators: List[BoolVar] = []
 
                 for r in range(R):
-                    # same_pos zählt NUR, wenn (1) dieses Band für Raum r gewählt ist und (2) Band aktiv ist
                     same_pos = model.NewBoolVar(f"h_same_pos_{r}_{tx}_{ty}")
                     model.Add(doorx[r] == tx).OnlyEnforceIf(
                         [same_pos, d_band[r][yb], band_active]
@@ -551,7 +608,6 @@ def add_door_placement_constraints(
                     )
                     indicators.append(same_pos)
 
-                # Zählen nur, wenn Band aktiv; sonst 0
                 model.Add(h_door_count == sum(indicators)).OnlyEnforceIf(band_active)
                 model.Add(h_door_count == 0).OnlyEnforceIf(band_active.Not())
                 model.Add(h_door_count <= DOOR_CLUSTER_LIMIT).OnlyEnforceIf(band_active)
@@ -801,41 +857,7 @@ def build_and_solve_cp(
 
         model.Add(y + h <= GRID_H)
 
-        # Türpositionen (8 Optionen: 4 Seiten + 4 Ecken)
-
-        dx_table: List[int] = []
-
-        dy_table: List[int] = []
-
-        for W, H in opts:
-
-            midW = W // 2
-
-            midH = H // 2
-
-            dx_table += [0, W - 1, midW, midW, 0, W - 1, 0, W - 1]
-
-            dy_table += [midH, midH, 0, H - 1, 0, 0, H - 1, H - 1]
-
-        # Türkombination
-
-        comb = model.NewIntVar(0, 8 * len(opts) - 1, f"comb_{r_idx}")
-
-        side = model.NewIntVar(0, 7, f"side_{r_idx}")
-
-        model.Add(comb == sid * 8 + side)
-
-        # Tür-Offset
-
-        dx_off = model.NewIntVar(0, max_w - 1, f"dxoff_{r_idx}")
-
-        dy_off = model.NewIntVar(0, max_h - 1, f"dyoff_{r_idx}")
-
-        model.AddElement(comb, dx_table, dx_off)
-
-        model.AddElement(comb, dy_table, dy_off)
-
-        # Türposition
+        # Türkoordinaten (Tür liegt auf einem Gangfeld)
 
         door_x = model.NewIntVar(0, GRID_W - 1, f"doorx_{r_idx}")
 
@@ -844,10 +866,6 @@ def build_and_solve_cp(
         doorx.append(door_x)
 
         doory.append(door_y)
-
-        model.Add(door_x == x + dx_off)
-
-        model.Add(door_y == y + dy_off)
 
         # Raumzentrum
 
@@ -899,20 +917,9 @@ def build_and_solve_cp(
 
     model.AddNoOverlap2D(x_intervals, y_intervals)
 
-    # Räume müssen links oder rechts des Hauptkorridors sein
-
-    for r in range(R):
-
-        left = model.NewBoolVar(f"left_{r}")
-
-        right = model.NewBoolVar(f"right_{r}")
-
-        model.Add(x_vars[r] + w_vars[r] <= ENTRANCE_X1).OnlyEnforceIf(left)
-
-        model.Add(x_vars[r] >= ENTRANCE_X2).OnlyEnforceIf(right)
-
-        model.AddBoolOr([left, right])
-    add_door_placement_constraints(model, doorx, doory, z, L)
+    add_door_placement_constraints(
+        model, x_vars, y_vars, w_vars, h_vars, doorx, doory, z, L
+    )
 
     # ---------- Symmetrie-Breaking ----------
 
@@ -1622,6 +1629,20 @@ def validate_solution_advanced(sol: CPSolution) -> Dict[str, bool]:
                 checks["no_room_overlap"] = False
 
                 break
+
+    # Räume dürfen keine Korridorkacheln belegen
+    checks["rooms_off_corridors"] = True
+    for r in sol.rooms:
+        if r["y"] < sol.entrance_len:
+            if not (r["x"] + r["w"] <= ENTRANCE_X1 or r["x"] >= ENTRANCE_X2):
+                checks["rooms_off_corridors"] = False
+                break
+        for yb in sol.horiz_y:
+            if r["y"] < yb + 4 and r["y"] + r["h"] > yb:
+                checks["rooms_off_corridors"] = False
+                break
+        if not checks["rooms_off_corridors"]:
+            break
 
     # Korridorverbindungen
 
