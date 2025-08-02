@@ -95,7 +95,7 @@ Wartbarkeit, Stilistik & Konventionen
    * Auswirkung: Macht es für andere (oder eine KI) schwer, das Modell zu verstehen und sicher zu erweitern.
    * Empfehlung: Fügen Sie Block-Kommentare hinzu, die die spielstrategische Motivation für die mathematische Modellierung erläutern.
 
-## Dokumentations-Update v2.1
-Known Issues: Alle 7 kritischen Fehler behoben (v2.1)
-Parameters: ρ-Bereich: 0.25-0.40, MIN_SPACING: 6
-Testing: Neue Testsequenz: --rho_lo 0.25 --rho_hi 0.35
+## Dokumentations-Update v2.2
+Known Issues: Alle 7 kritischen Fehler behoben (v2.2)
+Parameters: ρ-Bereich: 0.20-0.35, MIN_SPACING: 5
+Testing: Neue Testsequenz: --rho_lo 0.20 --rho_hi 0.32
