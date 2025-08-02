@@ -8,10 +8,10 @@ Ein hochentwickelter, auf Constraint-Programmierung basierender Optimierungs-Sol
 - [x] Flächenberechnung mit 5% Puffer (Issue #12)
 - [x] Türvalidierung für alle Räume (Hotfix #7)
 
-### Dokumentations-Update v2.1
-- Known Issues: Alle 7 kritischen Fehler behoben (v2.1)
-- Parameters: ρ-Bereich: 0.25-0.40, MIN_SPACING: 6
-- Testing: Neue Testsequenz: --rho_lo 0.25 --rho_hi 0.35
+### Dokumentations-Update v2.2
+- Known Issues: Alle 7 kritischen Fehler behoben (v2.2)
+- Parameters: ρ-Bereich: 0.20-0.35, MIN_SPACING: 5
+- Testing: Neue Testsequenz: --rho_lo 0.20 --rho_hi 0.32
 
 Inhaltsverzeichnis
  * Projektübersicht
@@ -81,7 +81,7 @@ python mad_games_tycoon_2_planer.py --time 3600 --precision_mode --analysis --ou
 6.2. Alle Kommandozeilen-Parameter
 | Parameter | Standardwert | Beschreibung |
 |---|---|---|
-| --time | 3600.0 | Gesamtzeitlimit in Sekunden für die Optimierung. Mehr Zeit führt fast immer zu besseren Ergebnissen. |
+| --time | 1200.0 | Gesamtzeitlimit in Sekunden für die Optimierung. Mehr Zeit führt fast immer zu besseren Ergebnissen. |
 | --threads | CPU-Anzahl | Anzahl der CPU-Threads, die der Solver verwenden soll. Standard ist die maximale verfügbare Anzahl. |
 | --seed | 42 | Zufalls-Seed für reproduzierbare Läufe. Ändern Sie diesen Wert, um unterschiedliche Lösungen zu explorieren. |
 | --outdir | "output" | Ausgabeverzeichnis für die resultierende .png- und .json-Datei. |
@@ -89,9 +89,9 @@ python mad_games_tycoon_2_planer.py --time 3600 --precision_mode --analysis --ou
 | --analysis | deaktiviert | Führt nach der Lösung eine detaillierte Analyse durch und speichert diese in der JSON-Datei. Sehr empfohlen. |
 | --multi_run | 1 | Anzahl der unabhängigen Durchläufe mit unterschiedlichen Seeds. Das Skript wählt am Ende die beste Lösung aus. |
 | --log | deaktiviert | Gibt den detaillierten Suchfortschritt des CP-SAT-Solvers auf der Konsole aus. Nützlich für Debugging. |
-| --rho_lo | 0.45 | Untere Grenze für die Flächennutzungsrate (ρ), die bei der Bisektionssuche getestet wird. |
-| --rho_hi | 0.65 | Obere Grenze für die Flächennutzungsrate (ρ). |
-| --tolerance | 1e-4 | Toleranz für den Abbruch der ρ-Bisektionssuche. |
+| --rho_lo | 0.20 | Untere Grenze für die Flächennutzungsrate (ρ), die bei der Bisektionssuche getestet wird. |
+| --rho_hi | 0.32 | Obere Grenze für die Flächennutzungsrate (ρ). |
+| --tolerance | 5e-3 | Toleranz für den Abbruch der ρ-Bisektionssuche. |
 | --selftest | deaktiviert | Führt einen schnellen Selbsttest (ca. 2-5 Minuten) durch, um die Funktionsfähigkeit des Skripts zu überprüfen. |
 7. Interpretation der Ergebnisse
 Nach einem erfolgreichen Lauf finden Sie im --outdir-Verzeichnis zwei Dateien:

@@ -80,9 +80,9 @@ ENTRANCE_X1, ENTRANCE_W = 56, 4
 
 ENTRANCE_X2 = ENTRANCE_X1 + ENTRANCE_W
 
-ENTRANCE_MIN_LEN = 10  # Mindestlänge des Korridors
+ENTRANCE_MIN_LEN = 6  # Mindestlänge des Korridors
 
-ENTRANCE_MAX_LEN = 35  # Maximale Länge des Korridors
+ENTRANCE_MAX_LEN = 20  # Maximale Länge des Korridors
 
 
 # Horizontale Bänder
@@ -91,29 +91,39 @@ MAX_DEEPEST = GRID_H - 4  # Maximale Y-Position für Bänder
 
 YCAND = list(range(0, MAX_DEEPEST + 1))  # Mögliche Y-Positionen (0..46)
 
-MIN_BANDS = 2  # Mindestanzahl horizontaler Bänder
+MIN_BANDS = 1  # Mindestanzahl horizontaler Bänder
 
-MAX_BANDS = 4  # Maximale Anzahl horizontaler Bänder
+MAX_BANDS = 3  # Maximale Anzahl horizontaler Bänder
 
-MIN_SPACING = 8  # Mindestabstand zwischen Bändern
+MIN_SPACING = 5  # Mindestabstand zwischen Bändern
 
 
 # Tür-Cluster Grenze (max. Türen pro Feld)
 
-DOOR_CLUSTER_LIMIT = 3
+DOOR_CLUSTER_LIMIT = 4
 
 
 # Distanz-Schwellen für Bonifikationen
 
-K_DOOR = 250  # Maximaler Distanz-Bonus für Türadjazenz
+K_DOOR = 150  # Maximaler Distanz-Bonus für Türadjazenz
 
-THRESHOLD_VERY_CLOSE_DOORS = 5
-THRESHOLD_CLOSE_DOORS = 15
-THRESHOLD_PRIORITY_DISTANCE = 25
-THRESHOLD_COMPACT_DISTANCE = 15
-THRESHOLD_HORIZ_BAND_DISTANCE = 8
-BALANCE_TOLERANCE = 3
-COMPACT_BONUS_VALUE = 500
+THRESHOLD_VERY_CLOSE_DOORS = 3
+THRESHOLD_CLOSE_DOORS = 8
+THRESHOLD_PRIORITY_DISTANCE = 15
+THRESHOLD_COMPACT_DISTANCE = 10
+THRESHOLD_HORIZ_BAND_DISTANCE = 5
+BALANCE_TOLERANCE = 4
+COMPACT_BONUS_VALUE = 300
+
+# Standardwerte für ρ-Bisektionssuche
+RHO_LO_DEFAULT: float = 0.20
+RHO_HI_DEFAULT: float = 0.35
+TOLERANCE_DEFAULT: float = 5e-3
+
+# Zielwerte für Flächenverteilung
+TARGET_ROOM_RATIO = 0.25
+TARGET_CORRIDOR_RATIO = 0.15
+TARGET_FREE_RATIO = 0.60
 
 logger = logging.getLogger(__name__)
 
@@ -250,29 +260,29 @@ class ProgressPrinter(cp_model.CpSolverSolutionCallback):
 
 # ======================= Zielfunktions-Gewichte =======================
 
-W_CORRIDOR_AREA = 500  # Strafe für Korridorfläche
+W_CORRIDOR_AREA = 200  # Strafe für Korridorfläche
 
-W_ENTRANCE_LEN = 300  # Strafe für lange Eingangskorridore
+W_ENTRANCE_LEN = 100  # Strafe für lange Eingangskorridore
 
-W_BORDER = 200  # Strafe für Randpositionen
+W_BORDER = 50  # Strafe für Randpositionen
 
-W_BAND_COUNT = 300  # Strafe für viele horizontale Bänder
+W_BAND_COUNT = 150  # Strafe für viele horizontale Bänder
 
-W_DOOR_ADJ = 12000  # Bonus für kurze Türdistanzen
+W_DOOR_ADJ = 8000  # Bonus für kurze Türdistanzen
 
-W_CENTER_ADJ = 2400  # Bonus für Zentrumsnähe
+W_CENTER_ADJ = 1500  # Bonus für Zentrumsnähe
 
-W_HORIZ_PREF = 5000  # Bonus für horizontale Präferenz
+W_HORIZ_PREF = 3000  # Bonus für horizontale Präferenz
 
-W_PROD_STORE_BON = 16000  # Bonus für Produktion-Lager-Adjazenz
+W_PROD_STORE_BON = 10000  # Bonus für Produktion-Lager-Adjazenz
 
-W_ROOM_EFFICIENCY = 8000  # Bonus für bevorzugte Raumgrößen
+W_ROOM_EFFICIENCY = 5000  # Bonus für bevorzugte Raumgrößen
 
-W_PRIORITY_BONUS = 4000  # Bonus für priorisierte Räume
+W_PRIORITY_BONUS = 2500  # Bonus für priorisierte Räume
 
-W_SYMMETRY_BONUS = 1500  # Bonus für symmetrische Verteilung
+W_SYMMETRY_BONUS = 800  # Bonus für symmetrische Verteilung
 
-W_COMPACT_BONUS = 3500  # Bonus für kompakte Gruppenbildung
+W_COMPACT_BONUS = 2000  # Bonus für kompakte Gruppenbildung
 
 
 # ======================= Raumdefinitionen =======================
@@ -304,30 +314,32 @@ class RoomDef:
 # Alle Raumdefinitionen
 
 ROOMS: List[RoomDef] = [
-    # Kernentwicklung – hohe Priorität
-    RoomDef("Dev", "Dev", 8, 8, 6, 7, 2, 1, 10, 1.5),
-    RoomDef("Graphics", "Studio", 8, 6, 6, 6, 2, 1, 9, 1.3),
-    RoomDef("Sound", "Studio", 8, 7, 6, 6, 2, 1, 9, 1.3),
-    RoomDef("MoCap", "Studio", 16, 8, 12, 8, 4, 1, 8, 1.2),
-    RoomDef("QA", "QA", 8, 8, 6, 6, 2, 1, 9, 1.4),
-    RoomDef("Research", "Research", 8, 6, 6, 6, 2, 1, 8, 1.1),
-    # Management & Betrieb
-    RoomDef("Head Office", "Admin", 6, 6, 6, 6, 1, 1, 9, 1.3),
-    RoomDef("Marketing", "Marketing", 10, 6, 6, 6, 1, 1, 7, 1.1),
-    RoomDef("Support1", "Support", 10, 8, 8, 6, 1, 1, 6, 1.0, "Support"),
-    RoomDef("Support2", "Support", 10, 8, 8, 6, 1, 1, 6, 1.0, "Support"),
-    # Spezialräume
-    RoomDef("Console", "Console", 10, 8, 10, 8, 1, 1, 7, 1.1),
-    RoomDef("Server", "Server", 10, 10, 8, 8, 1, 1, 8, 1.2),
-    RoomDef("Prod1", "Production", 12, 10, 11, 10, 1, 1, 8, 1.3, "Prod"),
-    RoomDef("Prod2", "Production", 12, 10, 11, 10, 1, 1, 8, 1.3, "Prod"),
-    RoomDef("Storeroom", "Storage", 11, 10, 11, 8, 1, 1, 9, 1.4),
-    # Training & Allgemein
-    RoomDef("Training", "Training", 11, 8, 11, 6, 1, 1, 6, 1.1),
-    RoomDef("Toilet1", "Facilities", 6, 4, 3, 3, 1, 1, 5, 0.8, "Toilet"),
-    RoomDef("Toilet2", "Facilities", 6, 4, 3, 3, 1, 1, 5, 0.8, "Toilet"),
-    RoomDef("Staff1", "Facilities", 8, 8, 6, 6, 1, 1, 6, 1.0, "Staff"),
-    RoomDef("Staff2", "Facilities", 8, 8, 6, 6, 1, 1, 6, 1.0, "Staff"),
+    # Kern-Räume (Höchste Priorität)
+    RoomDef("Dev", "Dev", 10, 8, 6, 6, 2, 1, 10, 1.5),
+    RoomDef("QA", "QA", 9, 7, 6, 6, 1, 1, 9, 1.4),
+    RoomDef("Research", "Research", 8, 7, 6, 6, 1, 1, 8, 1.1),
+    # Produktions-Räume
+    RoomDef("Prod1", "Production", 12, 8, 8, 6, 2, 1, 8, 1.3, "Prod"),
+    RoomDef("Prod2", "Production", 12, 8, 8, 6, 2, 1, 8, 1.3, "Prod"),
+    RoomDef("Storeroom", "Storage", 10, 8, 6, 6, 1, 1, 9, 1.4),
+    # Spezial-Studios
+    RoomDef("Graphics", "Studio", 8, 7, 6, 6, 1, 1, 9, 1.3),
+    RoomDef("Sound", "Studio", 8, 6, 6, 6, 1, 1, 9, 1.3),
+    RoomDef("MoCap", "Studio", 14, 8, 10, 6, 2, 1, 8, 1.2),
+    # Management & Support
+    RoomDef("Head Office", "Admin", 6, 6, 4, 4, 1, 1, 9, 1.3),
+    RoomDef("Marketing", "Marketing", 8, 6, 6, 6, 1, 1, 7, 1.1),
+    RoomDef("Support1", "Support", 8, 6, 6, 6, 1, 1, 6, 1.0, "Support"),
+    RoomDef("Support2", "Support", 8, 6, 6, 6, 1, 1, 6, 1.0, "Support"),
+    # Tech-Räume
+    RoomDef("Console", "Console", 10, 7, 6, 6, 1, 1, 7, 1.1),
+    RoomDef("Server", "Server", 10, 8, 6, 6, 1, 1, 8, 1.2),
+    RoomDef("Training", "Training", 10, 8, 6, 6, 1, 1, 6, 1.1),
+    # Komfort-Räume
+    RoomDef("Toilet1", "Facilities", 4, 4, 3, 3, 1, 1, 5, 0.8, "Toilet"),
+    RoomDef("Toilet2", "Facilities", 4, 4, 3, 3, 1, 1, 5, 0.8, "Toilet"),
+    RoomDef("Staff1", "Facilities", 6, 5, 4, 4, 1, 1, 6, 1.0, "Staff"),
+    RoomDef("Staff2", "Facilities", 6, 5, 4, 4, 1, 1, 6, 1.0, "Staff"),
 ]
 
 
@@ -354,31 +366,94 @@ for grp in dup_groups.values():
 # ======================= Adjazenz-Matrix =======================
 
 ADJ: Dict[str, Dict[str, int]] = {
-    "Production": {"Storage": 120, "Marketing": 60, "Admin": 50, "QA": 40},
-    "Storage": {"Production": 120, "Marketing": 40},
-    "Dev": {"Studio": 90, "QA": 90, "Research": 70, "Admin": 40},
-    "Studio": {"Dev": 90, "QA": 70, "Research": 30},
-    "QA": {"Dev": 90, "Studio": 70, "Support": 50, "Production": 30},
+    "Production": {"Storage": 100, "Marketing": 50, "Admin": 40, "QA": 30},
+    "Storage": {"Production": 100, "Marketing": 30},
+    "Dev": {"Studio": 80, "QA": 80, "Research": 60, "Admin": 30},
+    "Studio": {"Dev": 80, "QA": 60, "Research": 25},
+    "QA": {"Dev": 80, "Studio": 60, "Support": 40, "Production": 25},
     "Admin": {
-        "Marketing": 80,
-        "Support": 80,
-        "Production": 50,
-        "Console": 60,
-        "Dev": 40,
+        "Marketing": 70,
+        "Support": 70,
+        "Production": 40,
+        "Console": 50,
+        "Dev": 30,
     },
-    "Marketing": {"Admin": 80, "Production": 60, "Console": 40},
-    "Support": {"Admin": 80, "QA": 50, "Server": 60, "Dev": 30},
-    "Server": {"Support": 60, "Console": 40},
-    "Research": {"Dev": 70, "Studio": 30, "Admin": 30},
-    "Console": {"Admin": 60, "Dev": 50, "Marketing": 40, "Server": 40},
-    "Training": {"Dev": 50, "Admin": 50, "Studio": 40, "Support": 30},
+    "Marketing": {"Admin": 70, "Production": 50, "Console": 30},
+    "Support": {"Admin": 70, "QA": 40, "Server": 50, "Dev": 25},
+    "Server": {"Support": 50, "Console": 30},
+    "Research": {"Dev": 60, "Studio": 25, "Admin": 25},
+    "Console": {"Admin": 50, "Dev": 40, "Marketing": 30, "Server": 30},
+    "Training": {"Dev": 40, "Admin": 40, "Studio": 30, "Support": 25},
     "Facilities": {
-        "Dev": 60,
-        "Production": 60,
-        "Support": 60,
-        "Admin": 60,
-        "Studio": 40,
+        "Dev": 50,
+        "Production": 50,
+        "Support": 50,
+        "Admin": 50,
+        "Studio": 30,
     },
+}
+
+
+# ======================= Flächenvalidierung =======================
+
+
+def validate_area_constraints() -> bool:
+    """Prüft, ob die minimalen Raumflächen in das Raster passen."""
+
+    total_min_area = sum(rd.min_w * rd.min_h for rd in ROOMS)
+    min_corridor = ENTRANCE_W * ENTRANCE_MIN_LEN + MIN_BANDS * GRID_W * 4
+    available_area = TOTAL_AREA - min_corridor
+
+    print(f"Minimum Raumfläche: {total_min_area}")
+    print(f"Minimum Korridorfläche: {min_corridor}")
+    print(f"Verfügbare Fläche: {available_area}")
+    print(f"Feasible: {total_min_area <= available_area}")
+
+    return total_min_area <= available_area
+
+
+assert validate_area_constraints(), "Area constraints infeasible!"
+
+
+# ======================= Szenario-Parameter =======================
+
+SELFTEST_PARAMS = {
+    "time": 180,
+    "rho_lo": 0.18,
+    "rho_hi": 0.28,
+    "precision_mode": False,
+}
+
+NORMAL_PARAMS = {
+    "time": 1200,
+    "rho_lo": 0.20,
+    "rho_hi": 0.32,
+    "precision_mode": False,
+}
+
+PRECISION_PARAMS = {
+    "time": 3600,
+    "rho_lo": 0.22,
+    "rho_hi": 0.35,
+    "precision_mode": True,
+}
+
+
+# Solver-Parameter
+FAST_SOLVER_PARAMS = {
+    "cp_model_presolve": True,
+    "cp_model_probing_level": 1,
+    "linearization_level": 1,
+    "symmetry_level": 1,
+    "cut_level": 0,
+}
+
+PRECISION_SOLVER_PARAMS = {
+    "cp_model_probing_level": 2,
+    "linearization_level": 2,
+    "symmetry_level": 2,
+    "search_branching": cp_model.PORTFOLIO_SEARCH,
+    "cut_level": 1,
 }
 
 
@@ -1226,27 +1301,11 @@ def build_and_solve_cp(
 
     solver.parameters.log_search_progress = log_progress
 
-    if precision_mode:
+    solver.parameters.cp_model_presolve = True
 
-        solver.parameters.cp_model_presolve = True
-
-        solver.parameters.cp_model_probing_level = 3
-
-        solver.parameters.linearization_level = 2
-
-        solver.parameters.symmetry_level = 2
-
-        solver.parameters.search_branching = cp_model.PORTFOLIO_SEARCH
-
-        solver.parameters.cut_level = 1
-
-        solver.parameters.max_all_diff_cut_size = 64
-
-    else:
-
-        solver.parameters.cp_model_presolve = True
-
-        solver.parameters.cp_model_probing_level = 2
+    params_dict = PRECISION_SOLVER_PARAMS if precision_mode else FAST_SOLVER_PARAMS
+    for key, value in params_dict.items():
+        setattr(solver.parameters, key, value)
 
     # ---------- Lösung ----------
     t0 = time.time()
@@ -1415,9 +1474,9 @@ def search_max_rho_advanced(
     randomize: bool,
     progress_interval: float,
     progress_logger: Optional[NdjsonLogger] = None,
-    rho_lo: float = 0.40,
-    rho_hi: float = 0.70,
-    tol: float = 5e-4,
+    rho_lo: float = RHO_LO_DEFAULT,
+    rho_hi: float = RHO_HI_DEFAULT,
+    tol: float = TOLERANCE_DEFAULT,
 ) -> Tuple[CPSolution, CPSolution]:
     """
 
@@ -1720,6 +1779,20 @@ def validate_solution_advanced(sol: CPSolution) -> Dict[str, bool]:
     return checks
 
 
+def validate_realistic_layout(sol: CPSolution) -> Dict[str, bool]:
+    """Erweitert die Validierung um Realismus-Checks."""
+
+    checks = validate_solution_advanced(sol)
+
+    checks["reasonable_utilization"] = 0.15 <= sol.utilization <= 0.40
+    checks["dev_room_size_ok"] = any(
+        r["name"] == "Dev" and 36 <= r["w"] * r["h"] <= 80 for r in sol.rooms
+    )
+    checks["max_room_not_oversized"] = all(r["w"] * r["h"] <= 112 for r in sol.rooms)
+
+    return checks
+
+
 def top_adjacency_pairs(sol: CPSolution, limit: int = 5) -> List[Dict[str, Any]]:
     """Ermittelt die besten Adjazenz-Paare."""
 
@@ -2012,7 +2085,7 @@ def save_json_advanced(sol: CPSolution, path: str) -> None:
 
     # Validierungsergebnisse
 
-    validation = validate_solution_advanced(sol)
+    validation = validate_realistic_layout(sol)
 
     # Adjazenz-Analyse
 
@@ -2224,7 +2297,7 @@ def main(argv: List[str]) -> None:
     )
 
     parser.add_argument(
-        "--time", type=float, default=3600.0, help="Gesamtzeitlimit in Sekunden"
+        "--time", type=float, default=1200.0, help="Gesamtzeitlimit in Sekunden"
     )
 
     parser.add_argument(
@@ -2298,15 +2371,18 @@ def main(argv: List[str]) -> None:
     )
 
     parser.add_argument(
-        "--rho_lo", type=float, default=0.45, help="Untere Grenze für ρ-Suche"
+        "--rho_lo", type=float, default=RHO_LO_DEFAULT, help="Untere Grenze für ρ-Suche"
     )
 
     parser.add_argument(
-        "--rho_hi", type=float, default=0.65, help="Obere Grenze für ρ-Suche"
+        "--rho_hi", type=float, default=RHO_HI_DEFAULT, help="Obere Grenze für ρ-Suche"
     )
 
     parser.add_argument(
-        "--tolerance", type=float, default=1e-4, help="Toleranz für ρ-Bisektion"
+        "--tolerance",
+        type=float,
+        default=TOLERANCE_DEFAULT,
+        help="Toleranz für ρ-Bisektion",
     )
 
     parser.add_argument(
@@ -2347,16 +2423,21 @@ def main(argv: List[str]) -> None:
     if args.selftest:
 
         logger.info("\n[Selbsttest] Starte schnellen Testlauf...")
-        test_time = min(180.0, float(args.time))
-        rhos = [0.45, 0.50, 0.55]
+        params = SELFTEST_PARAMS.copy()
+        params["time"] = min(float(args.time), params["time"])
+        rhos = [
+            params["rho_lo"],
+            (params["rho_lo"] + params["rho_hi"]) / 2,
+            params["rho_hi"],
+        ]
         best: Optional[CPSolution] = None
         for i, rho in enumerate(rhos):
             sol = build_and_solve_cp(
-                test_time / len(rhos),
+                params["time"] / len(rhos),
                 args.threads,
                 args.seed + i,
                 rho,
-                False,
+                params["precision_mode"],
                 args.log,
                 args.randomize,
                 args.progress_interval,
@@ -2370,16 +2451,16 @@ def main(argv: List[str]) -> None:
                 "Selbsttest fehlgeschlagen: keine Lösung gefunden – ρ-Ziel zu hoch oder Mindestabstände verhindern Packung"
             )
             return
-        validation = validate_solution_advanced(best)
+        validation = validate_realistic_layout(best)
         if not all(validation.values()):
             logger.error("Selbsttest fehlgeschlagen: Platzierungsregeln verletzt")
             return
         base = os.path.join(args.outdir, "selftest_solution")
         best.runtime_info = {
-            "time_limit": test_time,
+            "time_limit": params["time"],
             "threads": args.threads,
             "seed": args.seed,
-            "precision_mode": False,
+            "precision_mode": params["precision_mode"],
             "randomize": args.randomize,
         }
         save_json_advanced(best, base + ".json")
@@ -2478,7 +2559,7 @@ def main(argv: List[str]) -> None:
 
             logger.info("\n[Analyse] Validierungsergebnisse:")
 
-            validation = validate_solution_advanced(best_solution)
+            validation = validate_realistic_layout(best_solution)
 
             for check, valid in validation.items():
 
