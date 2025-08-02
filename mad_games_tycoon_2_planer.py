@@ -550,23 +550,28 @@ def add_door_placement_constraints(
 
     for r in range(R):
         for yb in YCAND:
-            top = model.NewBoolVar(f"top_{r}_{yb}")
-            bot = model.NewBoolVar(f"bot_{r}_{yb}")
-            intersects = model.NewBoolVar(f"intersects_{r}_{yb}")
+            cond1 = model.NewBoolVar(f"yb_low_{r}_{yb}")
+            model.Add(y_vars[r] <= yb + 3).OnlyEnforceIf([cond1, z[yb]])
+            model.Add(y_vars[r] >= yb + 4).OnlyEnforceIf([cond1.Not(), z[yb]])
 
-            model.Add(y_vars[r] + h_vars[r] <= yb).OnlyEnforceIf(top)
-            model.Add(y_vars[r] + h_vars[r] >= yb + 1).OnlyEnforceIf(top.Not())
+            cond2 = model.NewBoolVar(f"yb_high_{r}_{yb}")
+            model.Add(y_vars[r] + h_vars[r] >= yb + 1).OnlyEnforceIf([cond2, z[yb]])
+            model.Add(y_vars[r] + h_vars[r] <= yb).OnlyEnforceIf([cond2.Not(), z[yb]])
 
-            model.Add(y_vars[r] >= yb + 4).OnlyEnforceIf(bot)
-            model.Add(y_vars[r] <= yb + 3).OnlyEnforceIf(bot.Not())
+            intersects_band = model.NewBoolVar(f"intersects_band_{r}_{yb}")
+            model.AddBoolAnd([cond1, cond2]).OnlyEnforceIf([intersects_band, z[yb]])
+            model.AddImplication(intersects_band, cond1)
+            model.AddImplication(intersects_band, cond2)
+            model.AddBoolOr([cond1.Not(), cond2.Not(), intersects_band, z[yb].Not()])
 
-            model.AddBoolOr([top, bot, intersects])
-            model.AddImplication(intersects, top.Not())
-            model.AddImplication(intersects, bot.Not())
-            model.AddImplication(top, intersects.Not())
-            model.AddImplication(bot, intersects.Not())
+            top_of_band = model.NewBoolVar(f"top_of_band_{r}_{yb}")
+            bot_of_band = model.NewBoolVar(f"bot_of_band_{r}_{yb}")
+            model.Add(y_vars[r] + h_vars[r] <= yb).OnlyEnforceIf([top_of_band, z[yb]])
+            model.Add(y_vars[r] >= yb + 4).OnlyEnforceIf([bot_of_band, z[yb]])
 
-            model.AddBoolOr([top, bot, z[yb].Not(), intersects.Not()])
+            model.AddBoolOr(
+                [top_of_band, bot_of_band, z[yb].Not(), intersects_band.Not()]
+            )
 
     for ty in range(ENTRANCE_MAX_LEN):
         row_active = model.NewBoolVar(f"row_active_{ty}")
