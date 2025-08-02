@@ -348,54 +348,80 @@ def add_door_placement_constraints(
     z: Dict[int, BoolVar],
     L: IntVar,
 ) -> None:
-    """Fügt Türplatzierungs- und Cluster-Constraints hinzu."""
+    """Fügt Türplatzierungs- und Cluster-Constraints hinzu (sauber kanalisiert)."""
 
+    # Booleans: Tür auf Vertikalkorridor vs. auf Band yb
     d_vert: List[BoolVar] = [model.NewBoolVar(f"dvert_{r}") for r in range(R)]
     d_band: List[List[BoolVar]] = [
         [model.NewBoolVar(f"d_{r}_{yb}") for yb in YCAND] for r in range(R)
     ]
+
+    # Regele: Wenn vertikal, dann (x in [X1,X2-1]) und (y < L)
     for r in range(R):
         model.Add(doorx[r] >= ENTRANCE_X1).OnlyEnforceIf(d_vert[r])
         model.Add(doorx[r] <= ENTRANCE_X2 - 1).OnlyEnforceIf(d_vert[r])
         model.Add(doory[r] < L).OnlyEnforceIf(d_vert[r])
+
+    # Regele: Wenn auf Band (r,yb), dann y in [yb, yb+3] und Band muss aktiv sein
+    for r in range(R):
         for yb in YCAND:
-            model.Add(doory[r] >= yb).OnlyEnforceIf(d_band[r][yb])
-            model.Add(doory[r] <= yb + 3).OnlyEnforceIf(d_band[r][yb])
-            model.Add(d_band[r][yb] <= z[yb])
+            model.Add(doory[r] >= yb).OnlyEnforceIf([d_band[r][yb], z[yb]])
+            model.Add(doory[r] <= yb + 3).OnlyEnforceIf([d_band[r][yb], z[yb]])
+            # Kein "OnlyEnforceIf(d_band<=z)" nötig, die folgende Exklusivität reicht
+
+    # Exakte Zuordnung: genau eins von (vertikal) oder (eines der Bänder)
     for r in range(R):
         model.Add(sum(d_band[r][yb] for yb in YCAND) + d_vert[r] == 1)
 
+    # -------- Vertikaler Korridor: Tür-Cluster begrenzen --------
     for ty in range(ENTRANCE_MAX_LEN):
         row_active = model.NewBoolVar(f"row_active_{ty}")
         model.Add(L > ty).OnlyEnforceIf(row_active)
+        model.Add(L <= ty).OnlyEnforceIf(row_active.Not())
+
         for tx in range(ENTRANCE_X1, ENTRANCE_X2):
             v_door_count = model.NewIntVar(0, R, f"vdoor_count_{tx}_{ty}")
             indicators: List[BoolVar] = []
+
             for r in range(R):
-                same_pos = model.NewBoolVar(f"same_pos_{r}_{tx}_{ty}")
-                model.Add(doorx[r] == tx).OnlyEnforceIf(same_pos)
-                model.Add(doorx[r] != tx).OnlyEnforceIf(same_pos.Not())
-                model.Add(doory[r] == ty).OnlyEnforceIf(same_pos)
-                model.Add(doory[r] != ty).OnlyEnforceIf(same_pos.Not())
+                # same_pos gilt nur, wenn (1) vertikaler Modus aktiv und (2) diese Zeile aktiv
+                same_pos = model.NewBoolVar(f"v_same_pos_{r}_{tx}_{ty}")
+                model.Add(doorx[r] == tx).OnlyEnforceIf(
+                    [same_pos, d_vert[r], row_active]
+                )
+                model.Add(doory[r] == ty).OnlyEnforceIf(
+                    [same_pos, d_vert[r], row_active]
+                )
+                # WICHTIG: KEINE '!= ...' Regeln für same_pos.Not()!
                 indicators.append(same_pos)
+
+            # Zählen nur, wenn Zeile aktiv; sonst 0
             model.Add(v_door_count == sum(indicators)).OnlyEnforceIf(row_active)
             model.Add(v_door_count == 0).OnlyEnforceIf(row_active.Not())
             model.Add(v_door_count <= DOOR_CLUSTER_LIMIT).OnlyEnforceIf(row_active)
 
+    # -------- Horizontale Bänder: Tür-Cluster begrenzen --------
     for yb in YCAND:
         band_active = z[yb]
         for ty in range(yb, yb + 4):
             for tx in range(GRID_W):
                 h_door_count = model.NewIntVar(0, R, f"hdoor_count_{tx}_{ty}")
                 indicators: List[BoolVar] = []
+
                 for r in range(R):
-                    same_pos = model.NewBoolVar(f"same_pos_{r}_{tx}_{ty}")
-                    model.Add(doorx[r] == tx).OnlyEnforceIf(same_pos)
-                    model.Add(doorx[r] != tx).OnlyEnforceIf(same_pos.Not())
-                    model.Add(doory[r] == ty).OnlyEnforceIf(same_pos)
-                    model.Add(doory[r] != ty).OnlyEnforceIf(same_pos.Not())
+                    # same_pos zählt NUR, wenn (1) dieses Band für Raum r gewählt ist und (2) Band aktiv ist
+                    same_pos = model.NewBoolVar(f"h_same_pos_{r}_{tx}_{ty}")
+                    model.Add(doorx[r] == tx).OnlyEnforceIf(
+                        [same_pos, d_band[r][yb], band_active]
+                    )
+                    model.Add(doory[r] == ty).OnlyEnforceIf(
+                        [same_pos, d_band[r][yb], band_active]
+                    )
                     indicators.append(same_pos)
-                model.Add(h_door_count == sum(indicators))
+
+                # Zählen nur, wenn Band aktiv; sonst 0
+                model.Add(h_door_count == sum(indicators)).OnlyEnforceIf(band_active)
+                model.Add(h_door_count == 0).OnlyEnforceIf(band_active.Not())
                 model.Add(h_door_count <= DOOR_CLUSTER_LIMIT).OnlyEnforceIf(band_active)
 
 
