@@ -1047,20 +1047,23 @@ def build_and_solve_cp(
             close_bonus = model.NewIntVar(0, K_DOOR, f"close_bonus_{i}_{j}")
 
             model.Add(close_bonus == K_DOOR).OnlyEnforceIf(vclose)
+            model.Add(close_bonus == 0).OnlyEnforceIf(vclose.Not())
 
             close = model.NewBoolVar(f"close_{i}_{j}")
 
             model.Add(d > THRESHOLD_VERY_CLOSE_DOORS).OnlyEnforceIf(close)
-
             model.Add(d <= THRESHOLD_CLOSE_DOORS).OnlyEnforceIf(close)
+            model.AddImplication(close, vclose.Not())
+            model.AddImplication(vclose, close.Not())
 
             medium_bonus = model.NewIntVar(0, K_DOOR // 2, f"medium_bonus_{i}_{j}")
 
-            model.Add(medium_bonus == K_DOOR // 2).OnlyEnforceIf([close, vclose.Not()])
+            model.Add(medium_bonus == K_DOOR // 2).OnlyEnforceIf(close)
+            model.Add(medium_bonus == 0).OnlyEnforceIf(close.Not())
 
             total_bonus = model.NewIntVar(0, K_DOOR, f"total_bonus_{i}_{j}")
 
-            model.AddMaxEquality(total_bonus, [close_bonus, medium_bonus])
+            model.Add(total_bonus == close_bonus + medium_bonus)
 
             pair_terms.append(wij * total_bonus)
 
@@ -1077,10 +1080,12 @@ def build_and_solve_cp(
             ccl = model.NewBoolVar(f"ccl_{i}_{j}")
 
             model.Add(dcent <= 20).OnlyEnforceIf(ccl)
+            model.Add(dcent > 20).OnlyEnforceIf(ccl.Not())
 
             cbonus = model.NewIntVar(0, K_DOOR // 4, f"cbonus_{i}_{j}")
 
             model.Add(cbonus == K_DOOR // 4).OnlyEnforceIf(ccl)
+            model.Add(cbonus == 0).OnlyEnforceIf(ccl.Not())
 
             center_terms.append(wij * cbonus)
 
@@ -1178,9 +1183,12 @@ def build_and_solve_cp(
         cap = int(1500 * mult)
         raw = model.NewIntVar(-10_000, 10_000, f"hraw_{i}")
         model.Add(raw == cap - min_dist * 10)
-        zero_var = model.NewIntVar(0, 0, f"zero_{i}")  # echte 0-IntVar
         bonus_val = model.NewIntVar(0, cap, f"hbonus_{i}")
-        model.AddMaxEquality(bonus_val, [raw, zero_var])
+        is_pos = model.NewBoolVar(f"hraw_pos_{i}")
+        model.Add(raw >= 0).OnlyEnforceIf(is_pos)
+        model.Add(raw <= -1).OnlyEnforceIf(is_pos.Not())
+        model.Add(bonus_val == raw).OnlyEnforceIf(is_pos)
+        model.Add(bonus_val == 0).OnlyEnforceIf(is_pos.Not())
         horiz_terms.append(bonus_val)
 
     obj += W_HORIZ_PREF * cp_model.LinearExpr.Sum(horiz_terms)
