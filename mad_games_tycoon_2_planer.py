@@ -559,7 +559,11 @@ def add_door_placement_constraints(
             model.Add(y_vars[r] + h_vars[r] <= yb).OnlyEnforceIf([cond2.Not(), z[yb]])
 
             intersects_band = model.NewBoolVar(f"intersects_band_{r}_{yb}")
-            model.AddBoolAnd([cond1, cond2]).OnlyEnforceIf([intersects_band, z[yb]])
+            both = model.NewBoolVar(f"both_{r}_{yb}")
+            model.AddBoolAnd([cond1, cond2]).OnlyEnforceIf(both)
+            model.AddImplication(both, intersects_band)
+            model.AddImplication(intersects_band, both)
+            model.AddImplication(intersects_band, z[yb])
             model.AddImplication(intersects_band, cond1)
             model.AddImplication(intersects_band, cond2)
             model.AddBoolOr([cond1.Not(), cond2.Not(), intersects_band, z[yb].Not()])
@@ -743,7 +747,7 @@ def build_and_solve_cp(
 
     band_count = model.NewIntVar(MIN_BANDS, MAX_BANDS, "band_count")
 
-    model.Add(band_count == cp_model.LinearExpr.Sum(list(z.values())))
+    model.Add(band_count == cp_model.LinearExpr.Sum([z[y] for y in YCAND]))
 
     # Mindestabstand zwischen Bändern
 
@@ -779,7 +783,13 @@ def build_and_solve_cp(
 
     corridor_area = model.NewIntVar(0, TOTAL_AREA, "corridor_area")
 
-    model.Add(corridor_area == ENTRANCE_W * L + sum(z[y] * GRID_W * 4 for y in YCAND))
+    horiz_flaechen: List[IntVar] = []
+    for y in YCAND:
+        h_flaeche: IntVar = model.NewIntVar(0, GRID_W * 4, f"harea_{y}")
+        model.Add(h_flaeche == z[y] * GRID_W * 4)
+        horiz_flaechen.append(h_flaeche)
+
+    model.Add(corridor_area == ENTRANCE_W * L + cp_model.LinearExpr.Sum(horiz_flaechen))
 
     # ---------- Raum-Variablen ----------
 
@@ -950,7 +960,7 @@ def build_and_solve_cp(
 
     room_area = model.NewIntVar(0, TOTAL_AREA, "room_area")
 
-    areas = []
+    areas: List[IntVar] = []
 
     for r, opts in enumerate(size_opts):
 
@@ -960,7 +970,7 @@ def build_and_solve_cp(
 
         areas.append(area)
 
-    model.Add(room_area == sum(areas))
+    model.Add(room_area == cp_model.LinearExpr.Sum(areas))
 
     # Nutzungsrate-Constraint
 
@@ -968,7 +978,7 @@ def build_and_solve_cp(
 
         rho_int = int(round(rho_target * 10000))
 
-        model.Add(room_area * 10000 >= rho_int * (TOTAL_AREA - corridor_area))
+        model.Add(room_area * 10000 + rho_int * corridor_area >= rho_int * TOTAL_AREA)
 
     # ---------- Zielfunktion ----------
 
