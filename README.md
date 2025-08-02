@@ -13,6 +13,17 @@ Ein hochentwickelter, auf Constraint-Programmierung basierender Optimierungs-Sol
 - Parameters: ρ-Bereich: 0.20-0.35, MIN_SPACING: 5
 - Testing: Neue Testsequenz: --rho_lo 0.20 --rho_hi 0.32
 
+## 🚀 Raumverteilungsoptimierung
+- **Korridor-Optimierung**:  
+  - Verlängerte Korridore (15-35 Felder statt 6-20)  
+- **Intelligente Band-Verteilung**:  
+  - Automatische Platzierung in 3 Zonen (unten, mitte, oben)  
+- **Flächennutzungsbonus-System**:  
+  - Bonus für vertikale Raumnutzung (Spanne min_y bis max_y)  
+- **Erwartete Verbesserung**:  
+  - Flächennutzung von 29% → 40-50%  
+  - Gleichmäßigere Raumverteilung über gesamtes Grid
+
 Inhaltsverzeichnis
  * Projektübersicht
  * Kernfunktionen
