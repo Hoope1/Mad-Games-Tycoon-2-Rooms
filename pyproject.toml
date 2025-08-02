@@ -1,0 +1,10 @@
+[tool.black]
+line-length = 88
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.pylint.main]
+fail-under = 9.0
+disable = ["C0103"]
