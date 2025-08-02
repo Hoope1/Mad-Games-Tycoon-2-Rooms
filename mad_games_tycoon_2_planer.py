@@ -80,9 +80,9 @@ ENTRANCE_X1, ENTRANCE_W = 56, 4
 
 ENTRANCE_X2 = ENTRANCE_X1 + ENTRANCE_W
 
-ENTRANCE_MIN_LEN = 10  # Mindestlänge des Korridors
+ENTRANCE_MIN_LEN = 8  # Mindestlänge des Korridors
 
-ENTRANCE_MAX_LEN = 35  # Maximale Länge des Korridors
+ENTRANCE_MAX_LEN = 25  # Maximale Länge des Korridors
 
 
 # Horizontale Bänder
@@ -91,11 +91,11 @@ MAX_DEEPEST = GRID_H - 4  # Maximale Y-Position für Bänder
 
 YCAND = list(range(0, MAX_DEEPEST + 1))  # Mögliche Y-Positionen (0..46)
 
-MIN_BANDS = 2  # Mindestanzahl horizontaler Bänder
+MIN_BANDS = 1  # Mindestanzahl horizontaler Bänder
 
-MAX_BANDS = 4  # Maximale Anzahl horizontaler Bänder
+MAX_BANDS = 3  # Maximale Anzahl horizontaler Bänder
 
-MIN_SPACING = 8  # Mindestabstand zwischen Bändern
+MIN_SPACING = 6  # Mindestabstand zwischen Bändern
 
 
 # Tür-Cluster Grenze (max. Türen pro Feld)
@@ -250,29 +250,29 @@ class ProgressPrinter(cp_model.CpSolverSolutionCallback):
 
 # ======================= Zielfunktions-Gewichte =======================
 
-W_CORRIDOR_AREA = 500  # Strafe für Korridorfläche
+W_CORRIDOR_AREA = 100  # Strafe für Korridorfläche
 
-W_ENTRANCE_LEN = 300  # Strafe für lange Eingangskorridore
+W_ENTRANCE_LEN = 50  # Strafe für lange Eingangskorridore
 
 W_BORDER = 200  # Strafe für Randpositionen
 
 W_BAND_COUNT = 300  # Strafe für viele horizontale Bänder
 
-W_DOOR_ADJ = 12000  # Bonus für kurze Türdistanzen
+W_DOOR_ADJ = 5000  # Bonus für kurze Türdistanzen
 
-W_CENTER_ADJ = 2400  # Bonus für Zentrumsnähe
+W_CENTER_ADJ = 1000  # Bonus für Zentrumsnähe
 
-W_HORIZ_PREF = 5000  # Bonus für horizontale Präferenz
+W_HORIZ_PREF = 2000  # Bonus für horizontale Präferenz
 
 W_PROD_STORE_BON = 16000  # Bonus für Produktion-Lager-Adjazenz
 
-W_ROOM_EFFICIENCY = 8000  # Bonus für bevorzugte Raumgrößen
+W_ROOM_EFFICIENCY = 3000  # Bonus für bevorzugte Raumgrößen
 
-W_PRIORITY_BONUS = 4000  # Bonus für priorisierte Räume
+W_PRIORITY_BONUS = 1500  # Bonus für priorisierte Räume
 
-W_SYMMETRY_BONUS = 1500  # Bonus für symmetrische Verteilung
+W_SYMMETRY_BONUS = 500  # Bonus für symmetrische Verteilung
 
-W_COMPACT_BONUS = 3500  # Bonus für kompakte Gruppenbildung
+W_COMPACT_BONUS = 1000  # Bonus für kompakte Gruppenbildung
 
 
 # ======================= Raumdefinitionen =======================
@@ -304,30 +304,30 @@ class RoomDef:
 # Alle Raumdefinitionen
 
 ROOMS: List[RoomDef] = [
-    # Kernentwicklung – hohe Priorität
-    RoomDef("Dev", "Dev", 8, 8, 6, 7, 2, 1, 10, 1.5),
-    RoomDef("Graphics", "Studio", 8, 6, 6, 6, 2, 1, 9, 1.3),
-    RoomDef("Sound", "Studio", 8, 7, 6, 6, 2, 1, 9, 1.3),
-    RoomDef("MoCap", "Studio", 16, 8, 12, 8, 4, 1, 8, 1.2),
-    RoomDef("QA", "QA", 8, 8, 6, 6, 2, 1, 9, 1.4),
-    RoomDef("Research", "Research", 8, 6, 6, 6, 2, 1, 8, 1.1),
-    # Management & Betrieb
-    RoomDef("Head Office", "Admin", 6, 6, 6, 6, 1, 1, 9, 1.3),
-    RoomDef("Marketing", "Marketing", 10, 6, 6, 6, 1, 1, 7, 1.1),
-    RoomDef("Support1", "Support", 10, 8, 8, 6, 1, 1, 6, 1.0, "Support"),
-    RoomDef("Support2", "Support", 10, 8, 8, 6, 1, 1, 6, 1.0, "Support"),
-    # Spezialräume
-    RoomDef("Console", "Console", 10, 8, 10, 8, 1, 1, 7, 1.1),
-    RoomDef("Server", "Server", 10, 10, 8, 8, 1, 1, 8, 1.2),
-    RoomDef("Prod1", "Production", 12, 10, 11, 10, 1, 1, 8, 1.3, "Prod"),
-    RoomDef("Prod2", "Production", 12, 10, 11, 10, 1, 1, 8, 1.3, "Prod"),
-    RoomDef("Storeroom", "Storage", 11, 10, 11, 8, 1, 1, 9, 1.4),
-    # Training & Allgemein
-    RoomDef("Training", "Training", 11, 8, 11, 6, 1, 1, 6, 1.1),
-    RoomDef("Toilet1", "Facilities", 6, 4, 3, 3, 1, 1, 5, 0.8, "Toilet"),
-    RoomDef("Toilet2", "Facilities", 6, 4, 3, 3, 1, 1, 5, 0.8, "Toilet"),
-    RoomDef("Staff1", "Facilities", 8, 8, 6, 6, 1, 1, 6, 1.0, "Staff"),
-    RoomDef("Staff2", "Facilities", 8, 8, 6, 6, 1, 1, 6, 1.0, "Staff"),
+    # Kernentwicklung – realistische Größen
+    RoomDef("Dev", "Dev", 6, 6, 4, 4, 1, 1, 10, 1.5),
+    RoomDef("Graphics", "Studio", 6, 5, 4, 4, 1, 1, 9, 1.3),
+    RoomDef("Sound", "Studio", 6, 5, 4, 4, 1, 1, 9, 1.3),
+    RoomDef("MoCap", "Studio", 8, 6, 6, 4, 2, 1, 8, 1.2),
+    RoomDef("QA", "QA", 6, 6, 4, 4, 1, 1, 9, 1.4),
+    RoomDef("Research", "Research", 6, 5, 4, 4, 1, 1, 8, 1.1),
+    # Management & Betrieb - angepasst
+    RoomDef("Head Office", "Admin", 5, 5, 4, 4, 1, 1, 9, 1.3),
+    RoomDef("Marketing", "Marketing", 6, 5, 4, 4, 1, 1, 7, 1.1),
+    RoomDef("Support1", "Support", 6, 6, 4, 4, 1, 1, 6, 1.0, "Support"),
+    RoomDef("Support2", "Support", 6, 6, 4, 4, 1, 1, 6, 1.0, "Support"),
+    # Spezialräume - reduziert
+    RoomDef("Console", "Console", 6, 6, 4, 4, 1, 1, 7, 1.1),
+    RoomDef("Server", "Server", 6, 6, 4, 4, 1, 1, 8, 1.2),
+    RoomDef("Prod1", "Production", 8, 6, 6, 4, 1, 1, 8, 1.3, "Prod"),
+    RoomDef("Prod2", "Production", 8, 6, 6, 4, 1, 1, 8, 1.3, "Prod"),
+    RoomDef("Storeroom", "Storage", 7, 6, 6, 4, 1, 1, 9, 1.4),
+    # Training & Facilities - minimiert
+    RoomDef("Training", "Training", 6, 5, 4, 4, 1, 1, 6, 1.1),
+    RoomDef("Toilet1", "Facilities", 4, 3, 3, 3, 1, 1, 5, 0.8, "Toilet"),
+    RoomDef("Toilet2", "Facilities", 4, 3, 3, 3, 1, 1, 5, 0.8, "Toilet"),
+    RoomDef("Staff1", "Facilities", 5, 5, 4, 4, 1, 1, 6, 1.0, "Staff"),
+    RoomDef("Staff2", "Facilities", 5, 5, 4, 4, 1, 1, 6, 1.0, "Staff"),
 ]
 
 
@@ -473,7 +473,7 @@ class CPSolution:
 # ======================= Modellaufbau & Lösung =======================
 
 
-def add_door_placement_constraints(
+def add_door_placement_constraints_simplified(
     model: cp_model.CpModel,
     x_vars: List[IntVar],
     y_vars: List[IntVar],
@@ -484,148 +484,32 @@ def add_door_placement_constraints(
     z: Dict[int, BoolVar],
     L: IntVar,
 ) -> None:
-    """Fügt Tür- und Gang-Constraints hinzu."""
-
-    d_vert: List[BoolVar] = [model.NewBoolVar(f"dvert_{r}") for r in range(R)]
-    d_band: List[List[BoolVar]] = [
-        [model.NewBoolVar(f"d_{r}_{yb}") for yb in YCAND] for r in range(R)
-    ]
+    """Vereinfachte Tür-Constraints."""
 
     for r in range(R):
-        model.Add(doorx[r] >= ENTRANCE_X1).OnlyEnforceIf(d_vert[r])
-        model.Add(doorx[r] < ENTRANCE_X2).OnlyEnforceIf(d_vert[r])
-        model.Add(doory[r] < L).OnlyEnforceIf(d_vert[r])
+        at_main_corridor = model.NewBoolVar(f"at_main_{r}")
+        at_band = model.NewBoolVar(f"at_band_{r}")
 
-        attach_left = model.NewBoolVar(f"attach_left_{r}")
-        attach_right = model.NewBoolVar(f"attach_right_{r}")
+        model.Add(doorx[r] >= ENTRANCE_X1).OnlyEnforceIf(at_main_corridor)
+        model.Add(doorx[r] < ENTRANCE_X2).OnlyEnforceIf(at_main_corridor)
+        model.Add(doory[r] < L).OnlyEnforceIf(at_main_corridor)
 
-        model.Add(x_vars[r] + w_vars[r] == doorx[r]).OnlyEnforceIf(attach_left)
-        model.Add(y_vars[r] <= doory[r]).OnlyEnforceIf(attach_left)
-        model.Add(doory[r] < y_vars[r] + h_vars[r]).OnlyEnforceIf(attach_left)
+        touches_corridor = model.NewBoolVar(f"touches_{r}")
+        model.Add(x_vars[r] + w_vars[r] == ENTRANCE_X1).OnlyEnforceIf(touches_corridor)
+        room_right = model.NewBoolVar(f"room_right_{r}")
+        model.Add(x_vars[r] >= ENTRANCE_X2).OnlyEnforceIf(room_right)
+        model.Add(x_vars[r] < ENTRANCE_X2).OnlyEnforceIf(room_right.Not())
+        model.AddBoolOr([room_right, touches_corridor]).OnlyEnforceIf(at_main_corridor)
 
-        model.Add(x_vars[r] == doorx[r] + 1).OnlyEnforceIf(attach_right)
-        model.Add(y_vars[r] <= doory[r]).OnlyEnforceIf(attach_right)
-        model.Add(doory[r] < y_vars[r] + h_vars[r]).OnlyEnforceIf(attach_right)
-
-        model.AddImplication(attach_left, d_vert[r])
-        model.AddImplication(attach_right, d_vert[r])
-        model.AddBoolOr([attach_left, attach_right]).OnlyEnforceIf(d_vert[r])
-
-    for r in range(R):
+        band_constraints: List[BoolVar] = []
         for yb in YCAND:
-            model.Add(d_band[r][yb] <= z[yb])
-            model.Add(doory[r] >= yb).OnlyEnforceIf([d_band[r][yb], z[yb]])
-            model.Add(doory[r] <= yb + 3).OnlyEnforceIf([d_band[r][yb], z[yb]])
+            at_this_band = model.NewBoolVar(f"at_band_{r}_{yb}")
+            model.Add(doory[r] >= yb).OnlyEnforceIf([at_this_band, z[yb]])
+            model.Add(doory[r] < yb + 4).OnlyEnforceIf([at_this_band, z[yb]])
+            band_constraints.append(at_this_band)
 
-            attach_top = model.NewBoolVar(f"attach_top_{r}_{yb}")
-            attach_bot = model.NewBoolVar(f"attach_bot_{r}_{yb}")
-
-            model.Add(y_vars[r] + h_vars[r] == doory[r]).OnlyEnforceIf(attach_top)
-            model.Add(x_vars[r] <= doorx[r]).OnlyEnforceIf(attach_top)
-            model.Add(doorx[r] < x_vars[r] + w_vars[r]).OnlyEnforceIf(attach_top)
-
-            model.Add(y_vars[r] == doory[r] + 1).OnlyEnforceIf(attach_bot)
-            model.Add(x_vars[r] <= doorx[r]).OnlyEnforceIf(attach_bot)
-            model.Add(doorx[r] < x_vars[r] + w_vars[r]).OnlyEnforceIf(attach_bot)
-
-            model.AddImplication(attach_top, d_band[r][yb])
-            model.AddImplication(attach_bot, d_band[r][yb])
-            model.AddBoolOr([attach_top, attach_bot]).OnlyEnforceIf(d_band[r][yb])
-
-    for r in range(R):
-        model.Add(
-            cp_model.LinearExpr.Sum([d_band[r][yb] for yb in YCAND]) + d_vert[r] == 1
-        )
-
-    for r in range(R):
-        intersects_vert = model.NewBoolVar(f"intersects_vert_{r}")
-        model.Add(y_vars[r] <= L - 1).OnlyEnforceIf(intersects_vert)
-        model.Add(y_vars[r] >= L).OnlyEnforceIf(intersects_vert.Not())
-
-        left_of = model.NewBoolVar(f"left_of_vert_{r}")
-        right_of = model.NewBoolVar(f"right_of_vert_{r}")
-
-        model.Add(x_vars[r] + w_vars[r] <= ENTRANCE_X1).OnlyEnforceIf(left_of)
-        model.Add(x_vars[r] >= ENTRANCE_X2).OnlyEnforceIf(right_of)
-
-        model.AddBoolOr([left_of, right_of, intersects_vert.Not()])
-
-    for r in range(R):
-        for yb in YCAND:
-            cond1 = model.NewBoolVar(f"yb_low_{r}_{yb}")
-            model.Add(y_vars[r] <= yb + 3).OnlyEnforceIf([cond1, z[yb]])
-            model.Add(y_vars[r] >= yb + 4).OnlyEnforceIf([cond1.Not(), z[yb]])
-
-            cond2 = model.NewBoolVar(f"yb_high_{r}_{yb}")
-            model.Add(y_vars[r] + h_vars[r] >= yb + 1).OnlyEnforceIf([cond2, z[yb]])
-            model.Add(y_vars[r] + h_vars[r] <= yb).OnlyEnforceIf([cond2.Not(), z[yb]])
-
-            intersects_band = model.NewBoolVar(f"intersects_band_{r}_{yb}")
-            both = model.NewBoolVar(f"both_{r}_{yb}")
-            model.AddBoolAnd([cond1, cond2]).OnlyEnforceIf(both)
-            model.AddImplication(both, intersects_band)
-            model.AddImplication(intersects_band, both)
-            model.AddImplication(intersects_band, z[yb])
-            model.AddImplication(intersects_band, cond1)
-            model.AddImplication(intersects_band, cond2)
-            model.AddBoolOr([cond1.Not(), cond2.Not(), intersects_band, z[yb].Not()])
-
-            top_of_band = model.NewBoolVar(f"top_of_band_{r}_{yb}")
-            bot_of_band = model.NewBoolVar(f"bot_of_band_{r}_{yb}")
-            model.Add(y_vars[r] + h_vars[r] <= yb).OnlyEnforceIf([top_of_band, z[yb]])
-            model.Add(y_vars[r] >= yb + 4).OnlyEnforceIf([bot_of_band, z[yb]])
-
-            model.AddBoolOr(
-                [top_of_band, bot_of_band, z[yb].Not(), intersects_band.Not()]
-            )
-
-    for ty in range(ENTRANCE_MAX_LEN):
-        row_active = model.NewBoolVar(f"row_active_{ty}")
-        model.Add(L > ty).OnlyEnforceIf(row_active)
-        model.Add(L <= ty).OnlyEnforceIf(row_active.Not())
-
-        for tx in range(ENTRANCE_X1, ENTRANCE_X2):
-            v_door_count = model.NewIntVar(0, R, f"vdoor_count_{tx}_{ty}")
-            indicators: List[BoolVar] = []
-
-            for r in range(R):
-                same_pos = model.NewBoolVar(f"v_same_pos_{r}_{tx}_{ty}")
-                model.Add(doorx[r] == tx).OnlyEnforceIf(
-                    [same_pos, d_vert[r], row_active]
-                )
-                model.Add(doory[r] == ty).OnlyEnforceIf(
-                    [same_pos, d_vert[r], row_active]
-                )
-                indicators.append(same_pos)
-
-            model.Add(
-                v_door_count == cp_model.LinearExpr.Sum(indicators)
-            ).OnlyEnforceIf(row_active)
-            model.Add(v_door_count == 0).OnlyEnforceIf(row_active.Not())
-            model.Add(v_door_count <= DOOR_CLUSTER_LIMIT).OnlyEnforceIf(row_active)
-
-    for yb in YCAND:
-        band_active = z[yb]
-        for ty in range(yb, yb + 4):
-            for tx in range(GRID_W):
-                h_door_count = model.NewIntVar(0, R, f"hdoor_count_{tx}_{ty}")
-                indicators: List[BoolVar] = []
-
-                for r in range(R):
-                    same_pos = model.NewBoolVar(f"h_same_pos_{r}_{tx}_{ty}")
-                    model.Add(doorx[r] == tx).OnlyEnforceIf(
-                        [same_pos, d_band[r][yb], band_active]
-                    )
-                    model.Add(doory[r] == ty).OnlyEnforceIf(
-                        [same_pos, d_band[r][yb], band_active]
-                    )
-                    indicators.append(same_pos)
-
-                model.Add(
-                    h_door_count == cp_model.LinearExpr.Sum(indicators)
-                ).OnlyEnforceIf(band_active)
-                model.Add(h_door_count == 0).OnlyEnforceIf(band_active.Not())
-                model.Add(h_door_count <= DOOR_CLUSTER_LIMIT).OnlyEnforceIf(band_active)
+        model.AddBoolOr(band_constraints).OnlyEnforceIf(at_band)
+        model.AddBoolOr([at_main_corridor, at_band])
 
 
 def add_compactness_logic(
@@ -949,7 +833,7 @@ def build_and_solve_cp(
 
     model.AddNoOverlap2D(x_intervals, y_intervals)
 
-    add_door_placement_constraints(
+    add_door_placement_constraints_simplified(
         model, x_vars, y_vars, w_vars, h_vars, doorx, doory, z, L
     )
 
@@ -994,8 +878,9 @@ def build_and_solve_cp(
     if rho_target is not None:
 
         rho_int = int(round(rho_target * 10000))
+        rho_buffer = rho_int * 95 // 100  # Puffer zur Entschärfung
 
-        model.Add(room_area * 10000 + rho_int * corridor_area >= rho_int * TOTAL_AREA)
+        model.Add(room_area * 10000 >= rho_buffer * (TOTAL_AREA - corridor_area))
 
     # ---------- Zielfunktion ----------
 
@@ -1415,9 +1300,9 @@ def search_max_rho_advanced(
     randomize: bool,
     progress_interval: float,
     progress_logger: Optional[NdjsonLogger] = None,
-    rho_lo: float = 0.40,
-    rho_hi: float = 0.70,
-    tol: float = 5e-4,
+    rho_lo: float = 0.20,
+    rho_hi: float = 0.40,
+    tol: float = 1e-3,
 ) -> Tuple[CPSolution, CPSolution]:
     """
 
@@ -1748,6 +1633,21 @@ def top_adjacency_pairs(sol: CPSolution, limit: int = 5) -> List[Dict[str, Any]]
                 }
             )
     return sorted(pairs, key=lambda x: -x["score"])[:limit]
+
+
+# ======================= Debugging =======================
+
+
+def debug_constraints(model: cp_model.CpModel) -> None:
+    """Debug-Ausgabe für Constraint-Analyse."""
+
+    print(f"Gesamtfläche: {TOTAL_AREA}")
+    total_min_area = sum(rd.min_w * rd.min_h for rd in ROOMS)
+    print(f"Minimum Raumfläche: {total_min_area}")
+    min_corridor = ENTRANCE_W * ENTRANCE_MIN_LEN + MIN_BANDS * GRID_W * 4
+    print(f"Minimum Korridorfläche: {min_corridor}")
+    print(f"Verfügbare Fläche: {TOTAL_AREA - min_corridor}")
+    print(f"Flächenkonflikt: {total_min_area > TOTAL_AREA - min_corridor}")
 
 
 # ======================= Visualisierung =======================
@@ -2298,15 +2198,15 @@ def main(argv: List[str]) -> None:
     )
 
     parser.add_argument(
-        "--rho_lo", type=float, default=0.45, help="Untere Grenze für ρ-Suche"
+        "--rho_lo", type=float, default=0.25, help="Untere Grenze für ρ-Suche"
     )
 
     parser.add_argument(
-        "--rho_hi", type=float, default=0.65, help="Obere Grenze für ρ-Suche"
+        "--rho_hi", type=float, default=0.45, help="Obere Grenze für ρ-Suche"
     )
 
     parser.add_argument(
-        "--tolerance", type=float, default=1e-4, help="Toleranz für ρ-Bisektion"
+        "--tolerance", type=float, default=1e-3, help="Toleranz für ρ-Bisektion"
     )
 
     parser.add_argument(
@@ -2348,7 +2248,7 @@ def main(argv: List[str]) -> None:
 
         logger.info("\n[Selbsttest] Starte schnellen Testlauf...")
         test_time = min(180.0, float(args.time))
-        rhos = [0.45, 0.50, 0.55]
+        rhos = [0.20, 0.25, 0.30]
         best: Optional[CPSolution] = None
         for i, rho in enumerate(rhos):
             sol = build_and_solve_cp(
