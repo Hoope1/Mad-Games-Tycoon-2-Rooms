@@ -533,7 +533,9 @@ def add_door_placement_constraints(
             model.AddBoolOr([attach_top, attach_bot]).OnlyEnforceIf(d_band[r][yb])
 
     for r in range(R):
-        model.Add(sum(d_band[r][yb] for yb in YCAND) + d_vert[r] == 1)
+        model.Add(
+            cp_model.LinearExpr.Sum([d_band[r][yb] for yb in YCAND]) + d_vert[r] == 1
+        )
 
     for r in range(R):
         intersects_vert = model.NewBoolVar(f"intersects_vert_{r}")
@@ -596,7 +598,9 @@ def add_door_placement_constraints(
                 )
                 indicators.append(same_pos)
 
-            model.Add(v_door_count == sum(indicators)).OnlyEnforceIf(row_active)
+            model.Add(
+                v_door_count == cp_model.LinearExpr.Sum(indicators)
+            ).OnlyEnforceIf(row_active)
             model.Add(v_door_count == 0).OnlyEnforceIf(row_active.Not())
             model.Add(v_door_count <= DOOR_CLUSTER_LIMIT).OnlyEnforceIf(row_active)
 
@@ -617,7 +621,9 @@ def add_door_placement_constraints(
                     )
                     indicators.append(same_pos)
 
-                model.Add(h_door_count == sum(indicators)).OnlyEnforceIf(band_active)
+                model.Add(
+                    h_door_count == cp_model.LinearExpr.Sum(indicators)
+                ).OnlyEnforceIf(band_active)
                 model.Add(h_door_count == 0).OnlyEnforceIf(band_active.Not())
                 model.Add(h_door_count <= DOOR_CLUSTER_LIMIT).OnlyEnforceIf(band_active)
 
@@ -636,8 +642,12 @@ def add_compactness_logic(
             continue
         avg_x = model.NewIntVar(0, GRID_W, f"avgx_{group}")
         avg_y = model.NewIntVar(0, GRID_H, f"avgy_{group}")
-        model.AddDivisionEquality(avg_x, sum(cx_vars[i] for i in indices), len(indices))
-        model.AddDivisionEquality(avg_y, sum(cy_vars[i] for i in indices), len(indices))
+        model.AddDivisionEquality(
+            avg_x, cp_model.LinearExpr.Sum([cx_vars[i] for i in indices]), len(indices)
+        )
+        model.AddDivisionEquality(
+            avg_y, cp_model.LinearExpr.Sum([cy_vars[i] for i in indices]), len(indices)
+        )
         for i in indices:
             dist = manhattan_distance_var(
                 model, cx_vars[i], cy_vars[i], avg_x, avg_y, f"compact_{group}_{i}"
@@ -672,8 +682,8 @@ def add_symmetry_constraints(
         model.AddBoolOr([is_left[r], is_right[r]])
     left_count = model.NewIntVar(0, R, "left_count")
     right_count = model.NewIntVar(0, R, "right_count")
-    model.Add(left_count == sum(is_left))
-    model.Add(right_count == sum(is_right))
+    model.Add(left_count == cp_model.LinearExpr.Sum(is_left))
+    model.Add(right_count == cp_model.LinearExpr.Sum(is_right))
     bal_diff = abs_var(model, left_count, right_count, R, "balance_diff")
     balanced = model.NewBoolVar("balanced")
     model.Add(bal_diff <= BALANCE_TOLERANCE).OnlyEnforceIf(balanced)
@@ -990,7 +1000,7 @@ def build_and_solve_cp(
 
     obj -= W_ENTRANCE_LEN * L
 
-    obj -= W_BORDER * sum(border.values())
+    obj -= W_BORDER * cp_model.LinearExpr.Sum(list(border.values()))
 
     obj -= W_BAND_COUNT * band_count
 
