@@ -39,7 +39,7 @@ import threading
 import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple, TypeAlias, cast
+from typing import Any, Dict, List, Optional, Sequence, Tuple, TypeAlias, cast
 
 # Matplotlib für Visualisierung (optional)
 
@@ -80,9 +80,9 @@ ENTRANCE_X1, ENTRANCE_W = 56, 4
 
 ENTRANCE_X2 = ENTRANCE_X1 + ENTRANCE_W
 
-ENTRANCE_MIN_LEN = 6  # Mindestlänge des Korridors
+ENTRANCE_MIN_LEN = 15  # GEÄNDERT
 
-ENTRANCE_MAX_LEN = 20  # Maximale Länge des Korridors
+ENTRANCE_MAX_LEN = 35  # GEÄNDERT
 
 
 # Horizontale Bänder
@@ -91,11 +91,11 @@ MAX_DEEPEST = GRID_H - 4  # Maximale Y-Position für Bänder
 
 YCAND = list(range(0, MAX_DEEPEST + 1))  # Mögliche Y-Positionen (0..46)
 
-MIN_BANDS = 1  # Mindestanzahl horizontaler Bänder
+MIN_BANDS = 2  # GEÄNDERT
 
-MAX_BANDS = 3  # Maximale Anzahl horizontaler Bänder
+MAX_BANDS = 4  # GEÄNDERT
 
-MIN_SPACING = 5  # Mindestabstand zwischen Bändern
+MIN_SPACING = 8  # GEÄNDERT
 
 
 # Tür-Cluster Grenze (max. Türen pro Feld)
@@ -775,6 +775,48 @@ def add_symmetry_constraints(
     return bal_bonus
 
 
+def enforce_band_distribution(
+    model: cp_model.CpModel,
+    z: Dict[int, BoolVar],
+    YCAND: Sequence[int],
+) -> None:
+    """Erzwingt Bänder in oberem, mittlerem und unterem Bereich."""
+
+    lower_bands = [y for y in YCAND if y <= 15]
+    middle_bands = [y for y in YCAND if 16 <= y <= 31]
+    upper_bands = [y for y in YCAND if y >= 32]
+
+    if lower_bands:
+        model.Add(cp_model.LinearExpr.Sum([z[y] for y in lower_bands]) >= 1)
+    if middle_bands:
+        model.Add(cp_model.LinearExpr.Sum([z[y] for y in middle_bands]) >= 1)
+    if upper_bands:
+        model.Add(cp_model.LinearExpr.Sum([z[y] for y in upper_bands]) >= 1)
+
+
+def add_space_utilization_bonus(
+    model: cp_model.CpModel,
+    y_vars: Sequence[IntVar],
+    h_vars: Sequence[IntVar],
+) -> cp_model.LinearExpr:
+    """Belohnt Nutzung des gesamten Y-Bereichs."""
+
+    min_y = model.NewIntVar(0, GRID_H, "min_used_y")
+    max_y = model.NewIntVar(0, GRID_H, "max_used_y")
+    model.AddMinEquality(min_y, y_vars)
+
+    max_positions: List[IntVar] = []
+    for r in range(len(y_vars)):
+        max_pos = model.NewIntVar(0, GRID_H, f"max_pos_{r}")
+        model.Add(max_pos == y_vars[r] + h_vars[r])
+        max_positions.append(max_pos)
+    model.AddMaxEquality(max_y, max_positions)
+
+    y_span = model.NewIntVar(0, GRID_H, "y_span")
+    model.Add(y_span == max_y - min_y)
+    return 1000 * y_span
+
+
 def build_and_solve_cp(
     max_time: Optional[float],
     threads: int,
@@ -855,6 +897,9 @@ def build_and_solve_cp(
     for y in YCAND:
 
         model.Add(L > y).OnlyEnforceIf(z[y])
+
+    # Bandverteilung über das gesamte Gitter erzwingen
+    enforce_band_distribution(model, z, YCAND)
 
     # Randnähe (Bonus für frühe Positionen)
 
@@ -1280,6 +1325,9 @@ def build_and_solve_cp(
 
     bal_bonus = add_symmetry_constraints(model, x_vars, w_vars)
     obj += W_SYMMETRY_BONUS * bal_bonus
+
+    space_util_bonus = add_space_utilization_bonus(model, y_vars, h_vars)
+    obj += space_util_bonus
 
     # Maximierung der Zielfunktion
 
