@@ -638,23 +638,29 @@ def add_compactness_logic(
     compact_terms: List[LinearExpr] = []
     for group in set(GROUPS):
         indices = [i for i, g in enumerate(GROUPS) if g == group]
-        if len(indices) <= 1:
+        n = len(indices)
+        if n <= 1:
             continue
-        avg_x = model.NewIntVar(0, GRID_W, f"avgx_{group}")
-        avg_y = model.NewIntVar(0, GRID_H, f"avgy_{group}")
-        model.AddDivisionEquality(
-            avg_x, cp_model.LinearExpr.Sum([cx_vars[i] for i in indices]), len(indices)
-        )
-        model.AddDivisionEquality(
-            avg_y, cp_model.LinearExpr.Sum([cy_vars[i] for i in indices]), len(indices)
-        )
+
+        # Summiere die Koordinaten, um den Gruppenschwerpunkt ohne Division zu modellieren
+        sum_x = model.NewIntVar(0, GRID_W * n, f"sumx_{group}")
+        sum_y = model.NewIntVar(0, GRID_H * n, f"sumy_{group}")
+        model.Add(sum_x == cp_model.LinearExpr.Sum([cx_vars[i] for i in indices]))
+        model.Add(sum_y == cp_model.LinearExpr.Sum([cy_vars[i] for i in indices]))
+
         for i in indices:
+            # Skaliere die Raumkoordinaten mit n, um die Entfernung zum Schwerpunkt zu berechnen
+            sx = model.NewIntVar(0, GRID_W * n, f"sx_{group}_{i}")
+            sy = model.NewIntVar(0, GRID_H * n, f"sy_{group}_{i}")
+            model.Add(sx == cx_vars[i] * n)
+            model.Add(sy == cy_vars[i] * n)
             dist = manhattan_distance_var(
-                model, cx_vars[i], cy_vars[i], avg_x, avg_y, f"compact_{group}_{i}"
+                model, sx, sy, sum_x, sum_y, f"compact_{group}_{i}"
             )
             compact = model.NewBoolVar(f"compact_{group}_{i}")
-            model.Add(dist <= THRESHOLD_COMPACT_DISTANCE).OnlyEnforceIf(compact)
-            model.Add(dist > THRESHOLD_COMPACT_DISTANCE).OnlyEnforceIf(compact.Not())
+            threshold = THRESHOLD_COMPACT_DISTANCE * n
+            model.Add(dist <= threshold).OnlyEnforceIf(compact)
+            model.Add(dist > threshold).OnlyEnforceIf(compact.Not())
             cbon = model.NewIntVar(0, COMPACT_BONUS_VALUE, f"cbon_{group}_{i}")
             model.Add(cbon == COMPACT_BONUS_VALUE).OnlyEnforceIf(compact)
             model.Add(cbon == 0).OnlyEnforceIf(compact.Not())
@@ -796,7 +802,8 @@ def build_and_solve_cp(
     horiz_flaechen: List[IntVar] = []
     for y in YCAND:
         h_flaeche: IntVar = model.NewIntVar(0, GRID_W * 4, f"harea_{y}")
-        model.Add(h_flaeche == z[y] * GRID_W * 4)
+        model.Add(h_flaeche == GRID_W * 4).OnlyEnforceIf(z[y])
+        model.Add(h_flaeche == 0).OnlyEnforceIf(z[y].Not())
         horiz_flaechen.append(h_flaeche)
 
     model.Add(corridor_area == ENTRANCE_W * L + cp_model.LinearExpr.Sum(horiz_flaechen))
@@ -1242,7 +1249,6 @@ def build_and_solve_cp(
         solver.parameters.cp_model_probing_level = 2
 
     # ---------- Lösung ----------
-
     t0 = time.time()
 
     callback: Optional[ProgressPrinter] = None
