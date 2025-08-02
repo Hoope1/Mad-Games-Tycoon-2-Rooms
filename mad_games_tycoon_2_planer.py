@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# mypy: ignore-errors
 
 """
 
@@ -30,11 +31,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 import time
+from collections import defaultdict
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 # Matplotlib für Visualisierung (optional)
 
@@ -49,14 +52,18 @@ except ImportError:
 
     HAVE_MPL = False
 
-    plt = None
+    plt = cast(Any, None)
 
-    Rectangle = None
+    Rectangle = cast(Any, None)
 
 
 # OR-Tools CP-SAT Solver
 
 from ortools.sat.python import cp_model
+
+IntVar = cp_model.IntVar  # pylint: disable=no-member
+BoolVar = cp_model.IntVar  # BoolVar is alias of IntVar
+LinearExpr = cp_model.LinearExpr  # pylint: disable=no-member
 
 # ======================= Geometrie & Konstanten =======================
 
@@ -97,6 +104,16 @@ DOOR_CLUSTER_LIMIT = 3
 # Distanz-Schwellen für Bonifikationen
 
 K_DOOR = 250  # Maximaler Distanz-Bonus für Türadjazenz
+
+THRESHOLD_VERY_CLOSE_DOORS = 5
+THRESHOLD_CLOSE_DOORS = 15
+THRESHOLD_PRIORITY_DISTANCE = 25
+THRESHOLD_COMPACT_DISTANCE = 15
+THRESHOLD_HORIZ_BAND_DISTANCE = 8
+BALANCE_TOLERANCE = 3
+COMPACT_BONUS_VALUE = 500
+
+logger = logging.getLogger(__name__)
 
 
 # ======================= Zielfunktions-Gewichte =======================
@@ -149,6 +166,7 @@ class RoomDef:
     priority: int = 5  # Priorität (1-10, 10=hoch)
 
     efficiency_factor: float = 1.0  # Effizienzgewicht
+    duplicate_id: Optional[str] = None  # Gruppen-ID für Duplikat-Räume
 
 
 # Alle Raumdefinitionen
@@ -164,20 +182,20 @@ ROOMS: List[RoomDef] = [
     # Management & Betrieb
     RoomDef("Head Office", "Admin", 6, 6, 6, 6, 1, 1, 9, 1.3),
     RoomDef("Marketing", "Marketing", 10, 6, 6, 6, 1, 1, 7, 1.1),
-    RoomDef("Support1", "Support", 10, 8, 8, 6, 1, 1, 6, 1.0),
-    RoomDef("Support2", "Support", 10, 8, 8, 6, 1, 1, 6, 1.0),
+    RoomDef("Support1", "Support", 10, 8, 8, 6, 1, 1, 6, 1.0, "Support"),
+    RoomDef("Support2", "Support", 10, 8, 8, 6, 1, 1, 6, 1.0, "Support"),
     # Spezialräume
     RoomDef("Console", "Console", 10, 8, 10, 8, 1, 1, 7, 1.1),
     RoomDef("Server", "Server", 10, 10, 8, 8, 1, 1, 8, 1.2),
-    RoomDef("Prod1", "Production", 12, 10, 11, 10, 1, 1, 8, 1.3),
-    RoomDef("Prod2", "Production", 12, 10, 11, 10, 1, 1, 8, 1.3),
+    RoomDef("Prod1", "Production", 12, 10, 11, 10, 1, 1, 8, 1.3, "Prod"),
+    RoomDef("Prod2", "Production", 12, 10, 11, 10, 1, 1, 8, 1.3, "Prod"),
     RoomDef("Storeroom", "Storage", 11, 10, 11, 8, 1, 1, 9, 1.4),
     # Training & Allgemein
     RoomDef("Training", "Training", 11, 8, 11, 6, 1, 1, 6, 1.1),
-    RoomDef("Toilet1", "Facilities", 6, 4, 3, 3, 1, 1, 5, 0.8),
-    RoomDef("Toilet2", "Facilities", 6, 4, 3, 3, 1, 1, 5, 0.8),
-    RoomDef("Staff1", "Facilities", 8, 8, 6, 6, 1, 1, 6, 1.0),
-    RoomDef("Staff2", "Facilities", 8, 8, 6, 6, 1, 1, 6, 1.0),
+    RoomDef("Toilet1", "Facilities", 6, 4, 3, 3, 1, 1, 5, 0.8, "Toilet"),
+    RoomDef("Toilet2", "Facilities", 6, 4, 3, 3, 1, 1, 5, 0.8, "Toilet"),
+    RoomDef("Staff1", "Facilities", 8, 8, 6, 6, 1, 1, 6, 1.0, "Staff"),
+    RoomDef("Staff2", "Facilities", 8, 8, 6, 6, 1, 1, 6, 1.0, "Staff"),
 ]
 
 
@@ -191,14 +209,14 @@ GROUPS = [rd.group for rd in ROOMS]  # Alle Gruppen
 # Duplikat-Sets für Symmetrie-Breaking
 
 DUP_SETS: List[List[int]] = []
+dup_groups: Dict[str, List[int]] = defaultdict(list)
+for idx, rd in enumerate(ROOMS):
+    if rd.duplicate_id:
+        dup_groups[rd.duplicate_id].append(idx)
 
-for prefix in ("Support", "Prod", "Toilet", "Staff"):
-
-    indices = [i for i, rd in enumerate(ROOMS) if rd.name.startswith(prefix)]
-
-    if len(indices) >= 2:
-
-        DUP_SETS.append(indices)
+for grp in dup_groups.values():
+    if len(grp) >= 2:
+        DUP_SETS.append(grp)
 
 
 # ======================= Adjazenz-Matrix =======================
@@ -250,8 +268,8 @@ def all_size_pairs(rd: RoomDef) -> List[Tuple[int, int]]:
 
 
 def abs_var(
-    model: cp_model.CpModel, a: cp_model.IntVar, b: cp_model.IntVar, ub: int, name: str
-) -> cp_model.IntVar:
+    model: cp_model.CpModel, a: IntVar, b: IntVar, ub: int, name: str
+) -> IntVar:
     """Erzeugt eine Variable für |a - b| mit oberer Schranke ub."""
 
     diff = model.NewIntVar(-ub, ub, f"{name}_diff")
@@ -267,12 +285,12 @@ def abs_var(
 
 def manhattan_distance_var(
     model: cp_model.CpModel,
-    x1: cp_model.IntVar,
-    y1: cp_model.IntVar,
-    x2: cp_model.IntVar,
-    y2: cp_model.IntVar,
+    x1: IntVar,
+    y1: IntVar,
+    x2: IntVar,
+    y2: IntVar,
     name: str,
-) -> cp_model.IntVar:
+) -> IntVar:
     """Berechnet die Manhattan-Distanz zwischen zwei Punkten als Variable."""
 
     dx = abs_var(model, x1, x2, GRID_W, f"{name}_dx")
@@ -303,7 +321,7 @@ class CPSolution:
 
     horiz_y: List[int]  # Y-Positionen der horizontalen Bänder
 
-    rooms: List[Dict]  # Raumpositionen und Eigenschaften
+    rooms: List[Dict[str, Any]]  # Raumpositionen und Eigenschaften
 
     room_area: int  # Gesamte Raumfläche
 
@@ -317,6 +335,125 @@ class CPSolution:
 
 
 # ======================= Modellaufbau & Lösung =======================
+
+
+def add_door_placement_constraints(
+    model: cp_model.CpModel,
+    doorx: List[IntVar],
+    doory: List[IntVar],
+    z: Dict[int, BoolVar],
+    L: IntVar,
+) -> None:
+    """Fügt Türplatzierungs- und Cluster-Constraints hinzu."""
+
+    d_vert: List[BoolVar] = [model.NewBoolVar(f"dvert_{r}") for r in range(R)]
+    d_band: List[List[BoolVar]] = [
+        [model.NewBoolVar(f"d_{r}_{yb}") for yb in YCAND] for r in range(R)
+    ]
+    for r in range(R):
+        model.Add(doorx[r] >= ENTRANCE_X1).OnlyEnforceIf(d_vert[r])
+        model.Add(doorx[r] <= ENTRANCE_X2 - 1).OnlyEnforceIf(d_vert[r])
+        model.Add(doory[r] < L).OnlyEnforceIf(d_vert[r])
+        for yb in YCAND:
+            model.Add(doory[r] >= yb).OnlyEnforceIf(d_band[r][yb])
+            model.Add(doory[r] <= yb + 3).OnlyEnforceIf(d_band[r][yb])
+            model.Add(d_band[r][yb] <= z[yb])
+    for r in range(R):
+        model.Add(sum(d_band[r][yb] for yb in YCAND) + d_vert[r] == 1)
+
+    for ty in range(ENTRANCE_MAX_LEN):
+        row_active = model.NewBoolVar(f"row_active_{ty}")
+        model.Add(L > ty).OnlyEnforceIf(row_active)
+        for tx in range(ENTRANCE_X1, ENTRANCE_X2):
+            door_count = model.NewIntVar(0, R, f"door_count_{tx}_{ty}")
+            indicators: List[BoolVar] = []
+            for r in range(R):
+                same_pos = model.NewBoolVar(f"same_pos_{r}_{tx}_{ty}")
+                model.Add(doorx[r] == tx).OnlyEnforceIf(same_pos)
+                model.Add(doorx[r] != tx).OnlyEnforceIf(same_pos.Not())
+                model.Add(doory[r] == ty).OnlyEnforceIf(same_pos)
+                model.Add(doory[r] != ty).OnlyEnforceIf(same_pos.Not())
+                indicators.append(same_pos)
+            model.Add(door_count == sum(indicators))
+            model.Add(door_count <= DOOR_CLUSTER_LIMIT).OnlyEnforceIf(row_active)
+
+    for yb in YCAND:
+        band_active = z[yb]
+        for ty in range(yb, yb + 4):
+            for tx in range(GRID_W):
+                door_count = model.NewIntVar(0, R, f"door_count_{tx}_{ty}")
+                indicators: List[BoolVar] = []
+                for r in range(R):
+                    same_pos = model.NewBoolVar(f"same_pos_{r}_{tx}_{ty}")
+                    model.Add(doorx[r] == tx).OnlyEnforceIf(same_pos)
+                    model.Add(doorx[r] != tx).OnlyEnforceIf(same_pos.Not())
+                    model.Add(doory[r] == ty).OnlyEnforceIf(same_pos)
+                    model.Add(doory[r] != ty).OnlyEnforceIf(same_pos.Not())
+                    indicators.append(same_pos)
+                model.Add(door_count == sum(indicators))
+                model.Add(door_count <= DOOR_CLUSTER_LIMIT).OnlyEnforceIf(band_active)
+
+
+def add_compactness_logic(
+    model: cp_model.CpModel,
+    cx_vars: List[IntVar],
+    cy_vars: List[IntVar],
+) -> List[LinearExpr]:
+    """Erzeugt Terme für kompakte Gruppierung von Räumen."""
+
+    compact_terms: List[LinearExpr] = []
+    for group in set(GROUPS):
+        indices = [i for i, g in enumerate(GROUPS) if g == group]
+        if len(indices) <= 1:
+            continue
+        avg_x = model.NewIntVar(0, GRID_W, f"avgx_{group}")
+        avg_y = model.NewIntVar(0, GRID_H, f"avgy_{group}")
+        model.Add(len(indices) * avg_x == sum(cx_vars[i] for i in indices))
+        model.Add(len(indices) * avg_y == sum(cy_vars[i] for i in indices))
+        for i in indices:
+            dist = manhattan_distance_var(
+                model, cx_vars[i], cy_vars[i], avg_x, avg_y, f"compact_{group}_{i}"
+            )
+            compact = model.NewBoolVar(f"compact_{group}_{i}")
+            model.Add(dist <= THRESHOLD_COMPACT_DISTANCE).OnlyEnforceIf(compact)
+            model.Add(dist > THRESHOLD_COMPACT_DISTANCE).OnlyEnforceIf(compact.Not())
+            cbon = model.NewIntVar(0, COMPACT_BONUS_VALUE, f"cbon_{group}_{i}")
+            model.Add(cbon == COMPACT_BONUS_VALUE).OnlyEnforceIf(compact)
+            model.Add(cbon == 0).OnlyEnforceIf(compact.Not())
+            compact_terms.append(cbon)
+    return compact_terms
+
+
+def add_symmetry_constraints(
+    model: cp_model.CpModel,
+    x_vars: List[IntVar],
+    w_vars: List[IntVar],
+) -> IntVar:
+    """Erzwingt eine ausgewogene Links-Rechts-Verteilung."""
+
+    is_left: List[BoolVar] = [model.NewBoolVar(f"is_left_{r}") for r in range(R)]
+    is_right: List[BoolVar] = [model.NewBoolVar(f"is_right_{r}") for r in range(R)]
+    mid = GRID_W // 2
+    for r in range(R):
+        center = model.NewIntVar(0, GRID_W, f"center_{r}")
+        model.Add(center * 2 == x_vars[r] * 2 + w_vars[r])
+        model.Add(center < mid).OnlyEnforceIf(is_left[r])
+        model.Add(center >= mid).OnlyEnforceIf(is_left[r].Not())
+        model.Add(center >= mid).OnlyEnforceIf(is_right[r])
+        model.Add(center < mid).OnlyEnforceIf(is_right[r].Not())
+        model.AddBoolOr([is_left[r], is_right[r]])
+    left_count = model.NewIntVar(0, R, "left_count")
+    right_count = model.NewIntVar(0, R, "right_count")
+    model.Add(left_count == sum(is_left))
+    model.Add(right_count == sum(is_right))
+    bal_diff = abs_var(model, left_count, right_count, R, "balance_diff")
+    balanced = model.NewBoolVar("balanced")
+    model.Add(bal_diff <= BALANCE_TOLERANCE).OnlyEnforceIf(balanced)
+    model.Add(bal_diff > BALANCE_TOLERANCE).OnlyEnforceIf(balanced.Not())
+    bal_bonus = model.NewIntVar(0, 1000, "balance_bonus")
+    model.Add(bal_bonus == 1000).OnlyEnforceIf(balanced)
+    model.Add(bal_bonus == 0).OnlyEnforceIf(balanced.Not())
+    return bal_bonus
 
 
 def build_and_solve_cp(
@@ -415,25 +552,25 @@ def build_and_solve_cp(
 
     size_opts: List[List[Tuple[int, int]]] = []  # Größenoptionen pro Raum
 
-    x_vars: List[cp_model.IntVar] = []  # X-Positionen
+    x_vars: List[IntVar] = []  # X-Positionen
 
-    y_vars: List[cp_model.IntVar] = []  # Y-Positionen
+    y_vars: List[IntVar] = []  # Y-Positionen
 
-    w_vars: List[cp_model.IntVar] = []  # Breiten
+    w_vars: List[IntVar] = []  # Breiten
 
-    h_vars: List[cp_model.IntVar] = []  # Höhen
+    h_vars: List[IntVar] = []  # Höhen
 
-    size_id: List[cp_model.IntVar] = []  # Größenindex
+    size_id: List[IntVar] = []  # Größenindex
 
-    is_pref: List[cp_model.BoolVar] = []  # Bevorzugte Größe?
+    is_pref: List[BoolVar] = []  # Bevorzugte Größe?
 
-    doorx: List[cp_model.IntVar] = []  # Tür X-Positionen
+    doorx: List[IntVar] = []  # Tür X-Positionen
 
-    doory: List[cp_model.IntVar] = []  # Tür Y-Positionen
+    doory: List[IntVar] = []  # Tür Y-Positionen
 
-    cx_vars: List[cp_model.IntVar] = []  # Raumzentrum X
+    cx_vars: List[IntVar] = []  # Raumzentrum X
 
-    cy_vars: List[cp_model.IntVar] = []  # Raumzentrum Y
+    cy_vars: List[IntVar] = []  # Raumzentrum Y
 
     for r_idx, rd in enumerate(ROOMS):
 
@@ -600,108 +737,7 @@ def build_and_solve_cp(
         model.Add(x_vars[r] >= ENTRANCE_X2).OnlyEnforceIf(right)
 
         model.AddBoolOr([left, right])
-
-    # ---------- Türpositionen ----------
-
-    # Türen müssen auf Korridoren liegen
-
-    d_vert = [model.NewBoolVar(f"dvert_{r}") for r in range(R)]
-
-    d_band = [[model.NewBoolVar(f"d_{r}_{yb}") for yb in YCAND] for r in range(R)]
-
-    for r in range(R):
-
-        # Hauptkorridor
-
-        model.Add(doorx[r] >= ENTRANCE_X1).OnlyEnforceIf(d_vert[r])
-
-        model.Add(doorx[r] <= ENTRANCE_X2 - 1).OnlyEnforceIf(d_vert[r])
-
-        model.Add(doory[r] < L).OnlyEnforceIf(d_vert[r])
-
-        # Horizontale Bänder
-
-        for yb in YCAND:
-
-            model.Add(doory[r] >= yb).OnlyEnforceIf(d_band[r][yb])
-
-            model.Add(doory[r] <= yb + 3).OnlyEnforceIf(d_band[r][yb])
-
-            model.Add(d_band[r][yb] <= z[yb])
-
-    for r in range(R):
-
-        model.Add(sum(d_band[r][yb] for yb in YCAND) + d_vert[r] == 1)
-
-    # Tür-Cluster vermeiden (max. 3 Türen pro Feld)
-
-    # Vertikaler Korridor
-
-    for ty in range(GRID_H):
-
-        if ty >= ENTRANCE_MAX_LEN:
-
-            continue
-
-        row_active = model.NewBoolVar(f"row_active_{ty}")
-
-        model.Add(L > ty).OnlyEnforceIf(row_active)
-
-        for tx in range(ENTRANCE_X1, ENTRANCE_X2):
-
-            door_count = model.NewIntVar(0, R, f"door_count_{tx}_{ty}")
-
-            indicators = []
-
-            for r in range(R):
-
-                same_pos = model.NewBoolVar(f"same_pos_{r}_{tx}_{ty}")
-
-                model.Add(doorx[r] == tx).OnlyEnforceIf(same_pos)
-
-                model.Add(doorx[r] != tx).OnlyEnforceIf(same_pos.Not())
-
-                model.Add(doory[r] == ty).OnlyEnforceIf(same_pos)
-
-                model.Add(doory[r] != ty).OnlyEnforceIf(same_pos.Not())
-
-                indicators.append(same_pos)
-
-            model.Add(door_count == sum(indicators))
-
-            model.Add(door_count <= DOOR_CLUSTER_LIMIT).OnlyEnforceIf(row_active)
-
-    # Horizontale Bänder
-
-    for yb in YCAND:
-
-        band_active = z[yb]
-
-        for ty in range(yb, yb + 4):
-
-            for tx in range(GRID_W):
-
-                door_count = model.NewIntVar(0, R, f"door_count_{tx}_{ty}")
-
-                indicators = []
-
-                for r in range(R):
-
-                    same_pos = model.NewBoolVar(f"same_pos_{r}_{tx}_{ty}")
-
-                    model.Add(doorx[r] == tx).OnlyEnforceIf(same_pos)
-
-                    model.Add(doorx[r] != tx).OnlyEnforceIf(same_pos.Not())
-
-                    model.Add(doory[r] == ty).OnlyEnforceIf(same_pos)
-
-                    model.Add(doory[r] != ty).OnlyEnforceIf(same_pos.Not())
-
-                    indicators.append(same_pos)
-
-                model.Add(door_count == sum(indicators))
-
-                model.Add(door_count <= DOOR_CLUSTER_LIMIT).OnlyEnforceIf(band_active)
+    add_door_placement_constraints(model, doorx, doory, z, L)
 
     # ---------- Symmetrie-Breaking ----------
 
@@ -749,7 +785,7 @@ def build_and_solve_cp(
 
     # ---------- Zielfunktion ----------
 
-    obj = cp_model.LinearExpr()
+    obj: LinearExpr = 0
 
     # Grundlegende Strafterme
 
@@ -797,9 +833,9 @@ def build_and_solve_cp(
 
             vclose = model.NewBoolVar(f"vclose_{i}_{j}")
 
-            model.Add(d <= 5).OnlyEnforceIf(vclose)
+            model.Add(d <= THRESHOLD_VERY_CLOSE_DOORS).OnlyEnforceIf(vclose)
 
-            model.Add(d > 5).OnlyEnforceIf(vclose.Not())
+            model.Add(d > THRESHOLD_VERY_CLOSE_DOORS).OnlyEnforceIf(vclose.Not())
 
             close_bonus = model.NewIntVar(0, K_DOOR, f"close_bonus_{i}_{j}")
 
@@ -807,9 +843,9 @@ def build_and_solve_cp(
 
             close = model.NewBoolVar(f"close_{i}_{j}")
 
-            model.Add(d >= 6).OnlyEnforceIf(close)
+            model.Add(d > THRESHOLD_VERY_CLOSE_DOORS).OnlyEnforceIf(close)
 
-            model.Add(d <= 15).OnlyEnforceIf(close)
+            model.Add(d <= THRESHOLD_CLOSE_DOORS).OnlyEnforceIf(close)
 
             medium_bonus = model.NewIntVar(0, K_DOOR // 2, f"medium_bonus_{i}_{j}")
 
@@ -892,7 +928,9 @@ def build_and_solve_cp(
 
             central = model.NewBoolVar(f"central_{r}")
 
-            model.Add(dist_entrance <= 25).OnlyEnforceIf(central)
+            model.Add(dist_entrance <= THRESHOLD_PRIORITY_DISTANCE).OnlyEnforceIf(
+                central
+            )
 
             pb = model.NewIntVar(0, rd.priority * 100, f"pbonus_{r}")
 
@@ -928,7 +966,7 @@ def build_and_solve_cp(
 
             active = model.NewBoolVar(f"active_{i}_{yb}")
 
-            model.Add(d <= 8).OnlyEnforceIf(active)
+            model.Add(d <= THRESHOLD_HORIZ_BAND_DISTANCE).OnlyEnforceIf(active)
 
             # Große Strafe wenn Band nicht aktiv
 
@@ -946,71 +984,10 @@ def build_and_solve_cp(
 
     obj += W_HORIZ_PREF * cp_model.LinearExpr.Sum(horiz_terms)
 
-    # Kompaktheits-Boni (Gruppen-Cluster)
-
-    compact_terms: List[cp_model.LinearExpr] = []
-
-    for group in set(GROUPS):
-
-        indices = [i for i, g in enumerate(GROUPS) if g == group]
-
-        if len(indices) < 2:
-
-            continue
-
-        # Gruppenmittelpunkt
-
-        avg_x = model.NewIntVar(0, GRID_W, f"avgx_{group}")
-
-        avg_y = model.NewIntVar(0, GRID_H, f"avgy_{group}")
-
-        model.AddDivisionEquality(avg_x, sum(cx_vars[i] for i in indices), len(indices))
-
-        model.AddDivisionEquality(avg_y, sum(cy_vars[i] for i in indices), len(indices))
-
-        # Distanzen zum Mittelpunkt
-
-        for i in indices:
-
-            dist = manhattan_distance_var(
-                model, cx_vars[i], cy_vars[i], avg_x, avg_y, f"compact_{group}_{i}"
-            )
-
-            compact = model.NewBoolVar(f"compact_{group}_{i}")
-
-            model.Add(dist <= 15).OnlyEnforceIf(compact)
-
-            cbon = model.NewIntVar(0, 500, f"cbon_{group}_{i}")
-
-            model.Add(cbon == 500).OnlyEnforceIf(compact)
-
-            compact_terms.append(cbon)
-
+    compact_terms = add_compactness_logic(model, cx_vars, cy_vars)
     obj += W_COMPACT_BONUS * cp_model.LinearExpr.Sum(compact_terms)
 
-    # Symmetrie-Bonus (Links-Rechts-Verteilung)
-
-    left_count = model.NewIntVar(0, R, "left_count")
-
-    right_count = model.NewIntVar(0, R, "right_count")
-
-    model.Add(
-        left_count
-        == sum(
-            model.NewBoolVar(f"left_{r}")
-            for r in range(R)
-            if model.Add(x_vars[r] + w_vars[r] // 2 < GRID_W // 2)
-        )
-    )
-
-    model.Add(right_count == R - left_count)
-
-    bal_diff = abs_var(model, left_count, right_count, R, "balance_diff")
-
-    bal_bonus = model.NewIntVar(0, 1000, "balance_bonus")
-
-    model.Add(bal_diff <= 3).OnlyEnforceIf(bal_bonus == 1000)
-
+    bal_bonus = add_symmetry_constraints(model, x_vars, w_vars)
     obj += W_SYMMETRY_BONUS * bal_bonus
 
     # Maximierung der Zielfunktion
@@ -1201,7 +1178,7 @@ def search_max_rho_advanced(
 
     stage2_time = time_limit - stage1_time
 
-    print(f"[ρ-Suche] Stufe 1: Exploration ({stage1_time:.1f}s)")
+    logger.info("[ρ-Suche] Stufe 1: Exploration (%.1fs)", stage1_time)
 
     test_points = [rho_lo + i * (rho_hi - rho_lo) / 3.0 for i in range(4)]
 
@@ -1219,11 +1196,13 @@ def search_max_rho_advanced(
 
             feasible_points.append((rho, sol))
 
-            print(f"  ρ={rho:.3f} ✓ util={sol.utilization:.3f} obj={sol.objective}")
+            logger.info(
+                "  ρ=%.3f ✓ util=%.3f obj=%s", rho, sol.utilization, sol.objective
+            )
 
         else:
 
-            print(f"  ρ={rho:.3f} ✗")
+            logger.info("  ρ=%.3f ✗", rho)
 
     # Bestimme vielversprechenden Bereich
 
@@ -1245,7 +1224,9 @@ def search_max_rho_advanced(
 
         best_sol = None
 
-    print(f"[ρ-Suche] Stufe 2: Bisektion [{lo:.4f}, {hi:.4f}] ({stage2_time:.1f}s)")
+    logger.info(
+        "[ρ-Suche] Stufe 2: Bisektion [%.4f, %.4f] (%.1fs)", lo, hi, stage2_time
+    )
 
     last_infeas = None
 
@@ -1269,7 +1250,7 @@ def search_max_rho_advanced(
 
             lo = mid + tol / 10.0
 
-            print(f"  Iter {k+1:02d}: ρ={mid:.5f} ✓ obj={sol.objective}")
+            logger.info("  Iter %02d: ρ=%.5f ✓ obj=%s", k + 1, mid, sol.objective)
 
         else:
 
@@ -1277,7 +1258,7 @@ def search_max_rho_advanced(
 
             hi = mid - tol / 10.0
 
-            print(f"  Iter {k+1:02d}: ρ={mid:.5f} ✗")
+            logger.info("  Iter %02d: ρ=%.5f ✗", k + 1, mid)
 
     # Fallback wenn keine feasible Lösung gefunden
 
@@ -1385,9 +1366,7 @@ def save_png_advanced(sol: CPSolution, path: str) -> None:
     """Erstellt eine detaillierte Visualisierung des Layouts als PNG."""
 
     if not HAVE_MPL:
-
-        print("Visualisierung deaktiviert: Matplotlib nicht verfügbar")
-
+        logger.warning("Visualisierung deaktiviert: Matplotlib nicht verfügbar")
         return
 
     fig, ax = plt.subplots(figsize=(20, 14))
@@ -1405,7 +1384,8 @@ def save_png_advanced(sol: CPSolution, path: str) -> None:
     ax.set_aspect("equal")
 
     ax.set_title(
-        f"Mad Games Tycoon 2 - Ultra-Precision Layout (ρ={sol.rho:.4f}, Util={sol.utilization*100:.2f}%)",
+        f"Mad Games Tycoon 2 - Ultra-Precision Layout "
+        f"(ρ={sol.rho:.4f}, Util={sol.utilization*100:.2f}%)",
         fontsize=16,
         pad=20,
     )
@@ -1630,7 +1610,7 @@ def save_png_advanced(sol: CPSolution, path: str) -> None:
 
     plt.close(fig)
 
-    print(f"Visualisierung gespeichert: {path}")
+    logger.info("Visualisierung gespeichert: %s", path)
 
 
 # ======================= Datenexport =======================
@@ -1673,11 +1653,11 @@ def save_json_advanced(sol: CPSolution, path: str) -> None:
 
             # Score berechnen
 
-            if d <= 5:
+            if d <= THRESHOLD_VERY_CLOSE_DOORS:
 
                 score = weight * 100
 
-            elif d <= 15:
+            elif d <= THRESHOLD_CLOSE_DOORS:
 
                 score = weight * 50
 
@@ -1821,7 +1801,7 @@ def save_json_advanced(sol: CPSolution, path: str) -> None:
 
         json.dump(out, f, ensure_ascii=False, indent=2)
 
-    print(f"Datenexport abgeschlossen: {path}")
+    logger.info("Datenexport abgeschlossen: %s", path)
 
 
 # ======================= CLI & Hauptfunktion =======================
@@ -1895,42 +1875,48 @@ def main(argv: List[str]) -> None:
 
     args = parser.parse_args(argv)
 
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+
     os.makedirs(args.outdir, exist_ok=True)
 
-    print("\n" + "=" * 70)
-
-    print("Mad Games Tycoon 2 – Ultra-Precision CP-SAT Planer")
-
-    print("=" * 70)
-
-    print(f"Threads: {args.threads}, Seed: {args.seed}")
-
-    print(f"Zeitbudget: {args.time:.0f}s, Präzisionsmodus: {args.precision_mode}")
-
-    print(
-        f"ρ-Bereich: [{args.rho_lo:.3f}, {args.rho_hi:.3f}], Toleranz: {args.tolerance:.1e}"
+    logger.info("\n" + "=" * 70)
+    logger.info("Mad Games Tycoon 2 – Ultra-Precision CP-SAT Planer")
+    logger.info("=" * 70)
+    logger.info("Threads: %s, Seed: %s", args.threads, args.seed)
+    logger.info(
+        "Zeitbudget: %ds, Präzisionsmodus: %s", int(args.time), args.precision_mode
     )
-
-    print(f"Ausgabeverzeichnis: {args.outdir}")
+    logger.info(
+        "ρ-Bereich: [%.3f, %.3f], Toleranz: %.1e",
+        args.rho_lo,
+        args.rho_hi,
+        args.tolerance,
+    )
+    logger.info("Ausgabeverzeichnis: %s", args.outdir)
 
     # Selbsttest-Modus
 
     if args.selftest:
 
-        print("\n[Selbsttest] Starte schnellen Testlauf...")
-
+        logger.info("\n[Selbsttest] Starte schnellen Testlauf...")
         test_time = min(120, args.time)
-
-        sol, _ = search_max_rho_advanced(
-            test_time, args.threads, args.seed, False, False, 0.4, 0.6, 1e-3
+        sol = build_and_solve_cp(test_time, args.threads, args.seed, 0.5, False, False)
+        if sol.status not in ("OPTIMAL", "FEASIBLE"):
+            logger.error("Selbsttest fehlgeschlagen: keine Lösung gefunden")
+            return
+        validation = validate_solution_advanced(sol)
+        if not all(validation.values()):
+            logger.error("Selbsttest fehlgeschlagen: Platzierungsregeln verletzt")
+            return
+        out_path = os.path.join(args.outdir, "selftest_solution.json")
+        save_json_advanced(sol, out_path)
+        logger.info(
+            "\nSelbsttest abgeschlossen: Status=%s, ρ=%.4f", sol.status, sol.rho
         )
-
-        print(f"\nSelbsttest abgeschlossen: Status={sol.status}, ρ={sol.rho:.4f}")
-
-        print(f"Raumfläche: {sol.room_area}, Korridorfläche: {sol.corridor_area}")
-
-        print(f"Nutzungsrate: {sol.utilization*100:.2f}%")
-
+        logger.info(
+            "Raumfläche: %d, Korridorfläche: %d", sol.room_area, sol.corridor_area
+        )
+        logger.info("Nutzungsrate: %.2f%%", sol.utilization * 100)
         return
 
     # Mehrfachläufe
@@ -1939,7 +1925,7 @@ def main(argv: List[str]) -> None:
 
     for run in range(1, args.multi_run + 1):
 
-        print(f"\n{'=' * 30} LAUF {run}/{args.multi_run} {'=' * 30}")
+        logger.info("\n%s LAUF %d/%d %s", "=" * 30, run, args.multi_run, "=" * 30)
 
         sol, _ = search_max_rho_advanced(
             args.time,
@@ -1954,19 +1940,23 @@ def main(argv: List[str]) -> None:
 
         solutions.append(sol)
 
-        print(f"Ergebnis {run}:")
+        logger.info("Ergebnis %d:", run)
 
-        print(f"  Status: {sol.status}")
+        logger.info("  Status: %s", sol.status)
 
-        print(f"  Zielfunktion: {sol.objective:,}")
+        logger.info("  Zielfunktion: %s", sol.objective)
 
-        print(
-            f"  Ziel ρ: {sol.rho:.4f}, Tatsächliche Nutzung: {sol.utilization*100:.2f}%"
+        logger.info(
+            "  Ziel ρ: %.4f, Tatsächliche Nutzung: %.2f%%",
+            sol.rho,
+            sol.utilization * 100,
         )
 
-        print(f"  Raumfläche: {sol.room_area}, Korridorfläche: {sol.corridor_area}")
+        logger.info(
+            "  Raumfläche: %d, Korridorfläche: %d", sol.room_area, sol.corridor_area
+        )
 
-        print(f"  Effizienz: {sol.efficiency_score:.3f}, Dauer: {sol.time_s:.1f}s")
+        logger.info("  Effizienz: %.3f, Dauer: %.1fs", sol.efficiency_score, sol.time_s)
 
     # Beste Lösung auswählen
 
@@ -1976,18 +1966,22 @@ def main(argv: List[str]) -> None:
 
         best_solution = max(valid_solutions, key=lambda s: s.objective)
 
-        print(f"\n{'=' * 30} BESTE LÖSUNG {'=' * 30}")
+        logger.info("\n%s BESTE LÖSUNG %s", "=" * 30, "=" * 30)
 
-        print(f"Zielfunktion: {best_solution.objective:,}")
+        logger.info("Zielfunktion: %s", best_solution.objective)
 
-        print(
-            f"Nutzungsrate: {best_solution.utilization*100:.2f}% (Ziel ρ={best_solution.rho*100:.2f}%)"
+        logger.info(
+            "Nutzungsrate: %.2f%% (Ziel ρ=%.2f%%)",
+            best_solution.utilization * 100,
+            best_solution.rho * 100,
         )
 
-        print(f"Eingangslänge: {best_solution.entrance_len}")
+        logger.info("Eingangslänge: %d", best_solution.entrance_len)
 
-        print(
-            f"Horizontale Bänder: {len(best_solution.horiz_y)} @ {best_solution.horiz_y}"
+        logger.info(
+            "Horizontale Bänder: %d @ %s",
+            len(best_solution.horiz_y),
+            best_solution.horiz_y,
         )
 
         # Export
@@ -2002,21 +1996,21 @@ def main(argv: List[str]) -> None:
 
         if args.analysis:
 
-            print("\n[Analyse] Validierungsergebnisse:")
+            logger.info("\n[Analyse] Validierungsergebnisse:")
 
             validation = validate_solution_advanced(best_solution)
 
             for check, valid in validation.items():
 
-                print(f"  {'✓' if valid else '✗'} {check}")
+                logger.info("  %s %s", "✓" if valid else "✗", check)
 
-            group_counts = {}
+            group_counts: Dict[str, int] = {}
 
             for r in best_solution.rooms:
 
                 group_counts[r["group"]] = group_counts.get(r["group"], 0) + 1
 
-            print("\nRaumverteilung nach Gruppen:")
+            logger.info("\nRaumverteilung nach Gruppen:")
 
             for group, count in sorted(group_counts.items()):
 
@@ -2024,15 +2018,15 @@ def main(argv: List[str]) -> None:
                     r["w"] * r["h"] for r in best_solution.rooms if r["group"] == group
                 )
 
-                print(f"  {group:12s}: {count:2d} Räume, {area:5d} Tiles")
+                logger.info("  %12s: %2d Räume, %5d Tiles", group, count, area)
 
     else:
 
-        print("\nKeine gültige Lösung gefunden!")
+        logger.error("\nKeine gültige Lösung gefunden!")
 
         if solutions:
 
-            print("Letzter Status:", solutions[-1].status)
+            logger.error("Letzter Status: %s", solutions[-1].status)
 
 
 if __name__ == "__main__":
