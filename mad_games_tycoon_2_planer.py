@@ -35,9 +35,9 @@ import logging
 import os
 import sys
 import time
-from collections import defaultdict
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple, cast
+from collections import Counter, defaultdict
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple, TypeAlias, cast
 
 # Matplotlib für Visualisierung (optional)
 
@@ -61,9 +61,9 @@ except ImportError:
 
 from ortools.sat.python import cp_model
 
-IntVar = cp_model.IntVar  # pylint: disable=no-member
-BoolVar = cp_model.IntVar  # BoolVar is alias of IntVar
-LinearExpr = cp_model.LinearExpr  # pylint: disable=no-member
+IntVar = cp_model.IntVar
+LinearExpr = cp_model.LinearExpr
+BoolVar: TypeAlias = IntVar  # OR-Tools BoolVars sind IntVar-Objekte mit Domäne {0,1}.
 
 # ======================= Geometrie & Konstanten =======================
 
@@ -333,6 +333,10 @@ class CPSolution:
 
     efficiency_score: float = 0.0  # Anteil Räume in bevorzugter Größe
 
+    solver_parameters: Dict[str, Any] = field(default_factory=dict)
+
+    runtime_info: Dict[str, Any] = field(default_factory=dict)
+
 
 # ======================= Modellaufbau & Lösung =======================
 
@@ -365,7 +369,7 @@ def add_door_placement_constraints(
         row_active = model.NewBoolVar(f"row_active_{ty}")
         model.Add(L > ty).OnlyEnforceIf(row_active)
         for tx in range(ENTRANCE_X1, ENTRANCE_X2):
-            door_count = model.NewIntVar(0, R, f"door_count_{tx}_{ty}")
+            v_door_count = model.NewIntVar(0, R, f"vdoor_count_{tx}_{ty}")
             indicators: List[BoolVar] = []
             for r in range(R):
                 same_pos = model.NewBoolVar(f"same_pos_{r}_{tx}_{ty}")
@@ -374,14 +378,15 @@ def add_door_placement_constraints(
                 model.Add(doory[r] == ty).OnlyEnforceIf(same_pos)
                 model.Add(doory[r] != ty).OnlyEnforceIf(same_pos.Not())
                 indicators.append(same_pos)
-            model.Add(door_count == sum(indicators))
-            model.Add(door_count <= DOOR_CLUSTER_LIMIT).OnlyEnforceIf(row_active)
+            model.Add(v_door_count == sum(indicators)).OnlyEnforceIf(row_active)
+            model.Add(v_door_count == 0).OnlyEnforceIf(row_active.Not())
+            model.Add(v_door_count <= DOOR_CLUSTER_LIMIT).OnlyEnforceIf(row_active)
 
     for yb in YCAND:
         band_active = z[yb]
         for ty in range(yb, yb + 4):
             for tx in range(GRID_W):
-                door_count = model.NewIntVar(0, R, f"door_count_{tx}_{ty}")
+                h_door_count = model.NewIntVar(0, R, f"hdoor_count_{tx}_{ty}")
                 indicators: List[BoolVar] = []
                 for r in range(R):
                     same_pos = model.NewBoolVar(f"same_pos_{r}_{tx}_{ty}")
@@ -390,8 +395,8 @@ def add_door_placement_constraints(
                     model.Add(doory[r] == ty).OnlyEnforceIf(same_pos)
                     model.Add(doory[r] != ty).OnlyEnforceIf(same_pos.Not())
                     indicators.append(same_pos)
-                model.Add(door_count == sum(indicators))
-                model.Add(door_count <= DOOR_CLUSTER_LIMIT).OnlyEnforceIf(band_active)
+                model.Add(h_door_count == sum(indicators))
+                model.Add(h_door_count <= DOOR_CLUSTER_LIMIT).OnlyEnforceIf(band_active)
 
 
 def add_compactness_logic(
@@ -408,8 +413,8 @@ def add_compactness_logic(
             continue
         avg_x = model.NewIntVar(0, GRID_W, f"avgx_{group}")
         avg_y = model.NewIntVar(0, GRID_H, f"avgy_{group}")
-        model.Add(len(indices) * avg_x == sum(cx_vars[i] for i in indices))
-        model.Add(len(indices) * avg_y == sum(cy_vars[i] for i in indices))
+        model.AddDivisionEquality(avg_x, sum(cx_vars[i] for i in indices), len(indices))
+        model.AddDivisionEquality(avg_y, sum(cy_vars[i] for i in indices), len(indices))
         for i in indices:
             dist = manhattan_distance_var(
                 model, cx_vars[i], cy_vars[i], avg_x, avg_y, f"compact_{group}_{i}"
@@ -463,6 +468,7 @@ def build_and_solve_cp(
     rho_target: Optional[float],
     precision_mode: bool = False,
     log_progress: bool = False,
+    randomize: bool = False,
 ) -> CPSolution:
     """
 
@@ -483,6 +489,8 @@ def build_and_solve_cp(
         precision_mode: Aktiviert erweiterte Solver-Optionen
 
         log_progress: Loggt den Lösungsfortschritt
+
+        randomize: Aktiviert Zufallssuche im Solver
 
 
 
@@ -510,7 +518,7 @@ def build_and_solve_cp(
 
     band_count = model.NewIntVar(MIN_BANDS, MAX_BANDS, "band_count")
 
-    model.Add(band_count == sum(z.values()))
+    model.Add(band_count == cp_model.LinearExpr.Sum(list(z.values())))
 
     # Mindestabstand zwischen Bändern
 
@@ -579,6 +587,9 @@ def build_and_solve_cp(
         opts = all_size_pairs(rd)
 
         size_opts.append(opts)
+
+        max_w = max(W for (W, H) in opts)
+        max_h = max(H for (W, H) in opts)
 
         # Größenindex
 
@@ -652,9 +663,9 @@ def build_and_solve_cp(
 
         # Tür-Offset
 
-        dx_off = model.NewIntVar(0, GRID_W, f"dxoff_{r_idx}")
+        dx_off = model.NewIntVar(0, max_w - 1, f"dxoff_{r_idx}")
 
-        dy_off = model.NewIntVar(0, GRID_H, f"dyoff_{r_idx}")
+        dy_off = model.NewIntVar(0, max_h - 1, f"dyoff_{r_idx}")
 
         model.AddElement(comb, dx_table, dx_off)
 
@@ -676,9 +687,9 @@ def build_and_solve_cp(
 
         # Raumzentrum
 
-        midw = model.NewIntVar(0, GRID_W, f"midw_{r_idx}")
+        midw = model.NewIntVar(0, max_w // 2, f"midw_{r_idx}")
 
-        midh = model.NewIntVar(0, GRID_H, f"midh_{r_idx}")
+        midh = model.NewIntVar(0, max_h // 2, f"midh_{r_idx}")
 
         model.AddElement(sid, [W // 2 for (W, H) in opts], midw)
 
@@ -785,7 +796,7 @@ def build_and_solve_cp(
 
     # ---------- Zielfunktion ----------
 
-    obj: LinearExpr = 0
+    obj = cp_model.LinearExpr.Sum([])
 
     # Grundlegende Strafterme
 
@@ -957,29 +968,19 @@ def build_and_solve_cp(
         min_dists = []
 
         for yb in YCAND:
-
-            # Distanz zum Band
-
             d = abs_var(
                 model, doory[i], model.NewConstant(yb + 2), GRID_H, f"hdist_{i}_{yb}"
             )
-
-            active = model.NewBoolVar(f"active_{i}_{yb}")
-
-            model.Add(d <= THRESHOLD_HORIZ_BAND_DISTANCE).OnlyEnforceIf(active)
-
-            # Große Strafe wenn Band nicht aktiv
-
             min_dists.append(d + 1000 * (1 - z[yb]))
 
         min_dist = model.NewIntVar(0, 1000, f"min_dist_{i}")
-
         model.AddMinEquality(min_dist, min_dists)
-
-        bonus_val = model.NewIntVar(0, int(1500 * mult), f"hbonus_{i}")
-
-        model.Add(bonus_val == int(1500 * mult) - min_dist * 10)
-
+        cap = int(1500 * mult)
+        raw = model.NewIntVar(-10_000, 10_000, f"hraw_{i}")
+        model.Add(raw == cap - min_dist * 10)
+        zero = model.NewConstant(0)
+        bonus_val = model.NewIntVar(0, cap, f"hbonus_{i}")
+        model.AddMaxEquality(bonus_val, [raw, zero])
         horiz_terms.append(bonus_val)
 
     obj += W_HORIZ_PREF * cp_model.LinearExpr.Sum(horiz_terms)
@@ -1006,7 +1007,7 @@ def build_and_solve_cp(
 
     solver.parameters.random_seed = seed
 
-    solver.parameters.randomize_search = True
+    solver.parameters.randomize_search = randomize
 
     solver.parameters.log_search_progress = log_progress
 
@@ -1127,6 +1128,12 @@ def build_and_solve_cp(
         )
 
     eff_score = pref_count / R if R > 0 else 0.0
+    solver_params = {
+        "max_time_s": solver.parameters.max_time_in_seconds,
+        "random_seed": solver.parameters.random_seed,
+        "num_search_workers": solver.parameters.num_search_workers,
+        "randomize_search": solver.parameters.randomize_search,
+    }
 
     return CPSolution(
         status=status_name,
@@ -1140,6 +1147,7 @@ def build_and_solve_cp(
         utilization=util,
         time_s=t1 - t0,
         efficiency_score=eff_score,
+        solver_parameters=solver_params,
     )
 
 
@@ -1152,6 +1160,7 @@ def search_max_rho_advanced(
     seed: int,
     precision_mode: bool,
     log_progress: bool,
+    randomize: bool,
     rho_lo: float = 0.40,
     rho_hi: float = 0.70,
     tol: float = 5e-4,
@@ -1189,7 +1198,7 @@ def search_max_rho_advanced(
     for rho in test_points:
 
         sol = build_and_solve_cp(
-            stage1_time / 4, threads, seed, rho, False, log_progress
+            stage1_time / 4, threads, seed, rho, False, log_progress, randomize
         )
 
         if sol.status in ("OPTIMAL", "FEASIBLE"):
@@ -1232,16 +1241,22 @@ def search_max_rho_advanced(
 
     # Präzise Bisektion
 
-    for k in range(12):
-
+    iters = 12
+    t_start = time.time()
+    for k in range(iters):
         if hi - lo < tol:
-
             break
-
+        remaining = max(5.0, stage2_time - (time.time() - t_start))
+        per_iter = remaining / (iters - k)
         mid = (lo + hi) / 2.0
-
         sol = build_and_solve_cp(
-            stage2_time / 6, threads, seed + k, mid, precision_mode, log_progress
+            per_iter,
+            threads,
+            seed + k,
+            mid,
+            precision_mode,
+            log_progress,
+            randomize,
         )
 
         if sol.status in ("OPTIMAL", "FEASIBLE"):
@@ -1265,7 +1280,13 @@ def search_max_rho_advanced(
     if best_sol is None:
 
         best_sol = build_and_solve_cp(
-            time_limit * 0.2, threads, seed, None, precision_mode, log_progress
+            time_limit * 0.2,
+            threads,
+            seed,
+            None,
+            precision_mode,
+            log_progress,
+            randomize,
         )
 
     if last_infeas is None:
@@ -1334,16 +1355,8 @@ def validate_solution_advanced(sol: CPSolution) -> Dict[str, bool]:
     # Tür-Cluster
 
     door_positions = [(r["door"]["x"], r["door"]["y"]) for r in sol.rooms]
-
-    checks["door_clusters"] = True
-
-    for pos in set(door_positions):
-
-        if door_positions.count(pos) > DOOR_CLUSTER_LIMIT:
-
-            checks["door_clusters"] = False
-
-            break
+    counts = Counter(door_positions)
+    checks["door_clusters"] = all(c <= DOOR_CLUSTER_LIMIT for c in counts.values())
 
     # Raumgrößen
 
@@ -1733,6 +1746,14 @@ def save_json_advanced(sol: CPSolution, path: str) -> None:
             "version": "2.1",
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             "grid_size": {"width": GRID_W, "height": GRID_H, "total_area": TOTAL_AREA},
+            "solver_parameters": {
+                "max_time_s": sol.solver_parameters.get("max_time_s"),
+                "random_seed": sol.solver_parameters.get("random_seed"),
+                "num_search_workers": sol.solver_parameters.get("num_search_workers"),
+                "randomize_search": sol.solver_parameters.get("randomize_search"),
+            },
+            "runtime_info": sol.runtime_info,
+            "argv": sys.argv,
         },
         "solution": {
             "status": sol.status,
@@ -1791,6 +1812,15 @@ def save_json_advanced(sol: CPSolution, path: str) -> None:
             "symmetry_bonus": W_SYMMETRY_BONUS,
             "compact_bonus": W_COMPACT_BONUS,
         },
+        "thresholds": {
+            "very_close_doors": THRESHOLD_VERY_CLOSE_DOORS,
+            "close_doors": THRESHOLD_CLOSE_DOORS,
+            "priority_distance": THRESHOLD_PRIORITY_DISTANCE,
+            "compact_distance": THRESHOLD_COMPACT_DISTANCE,
+            "horiz_band_distance": THRESHOLD_HORIZ_BAND_DISTANCE,
+            "balance_tolerance": BALANCE_TOLERANCE,
+        },
+        "artifacts": {"png_path_hint": path.replace(".json", ".png")},
     }
 
     # Speichern
@@ -1858,6 +1888,18 @@ def main(argv: List[str]) -> None:
     )
 
     parser.add_argument(
+        "--randomize",
+        action="store_true",
+        help="Zufällige Suchheuristiken aktivieren (sonst deterministischer)",
+    )
+
+    parser.add_argument(
+        "--weights_json",
+        type=str,
+        help="Pfad zu einer JSON-Datei, die W_* Gewichte überschreibt",
+    )
+
+    parser.add_argument(
         "--rho_lo", type=float, default=0.45, help="Untere Grenze für ρ-Suche"
     )
 
@@ -1875,7 +1917,13 @@ def main(argv: List[str]) -> None:
 
     args = parser.parse_args(argv)
 
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    if args.weights_json:
+        with open(args.weights_json, "r", encoding="utf-8") as f:
+            w = json.load(f)
+        globals().update({k: int(v) for k, v in w.items() if k.startswith("W_")})
+
+    level = logging.INFO if args.log else logging.WARNING
+    logging.basicConfig(level=level, format="%(message)s")
 
     os.makedirs(args.outdir, exist_ok=True)
 
@@ -1899,24 +1947,42 @@ def main(argv: List[str]) -> None:
     if args.selftest:
 
         logger.info("\n[Selbsttest] Starte schnellen Testlauf...")
-        test_time = min(120, args.time)
-        sol = build_and_solve_cp(test_time, args.threads, args.seed, 0.5, False, False)
-        if sol.status not in ("OPTIMAL", "FEASIBLE"):
+        test_time = min(180.0, float(args.time))
+        rhos = [0.45, 0.50, 0.55]
+        best: Optional[CPSolution] = None
+        for i, rho in enumerate(rhos):
+            sol = build_and_solve_cp(
+                test_time / len(rhos),
+                args.threads,
+                args.seed + i,
+                rho,
+                False,
+                False,
+                args.randomize,
+            )
+            if sol.status in ("OPTIMAL", "FEASIBLE"):
+                if best is None or sol.objective > best.objective:
+                    best = sol
+        if best is None:
             logger.error("Selbsttest fehlgeschlagen: keine Lösung gefunden")
             return
-        validation = validate_solution_advanced(sol)
+        validation = validate_solution_advanced(best)
         if not all(validation.values()):
             logger.error("Selbsttest fehlgeschlagen: Platzierungsregeln verletzt")
             return
-        out_path = os.path.join(args.outdir, "selftest_solution.json")
-        save_json_advanced(sol, out_path)
+        base = os.path.join(args.outdir, "selftest_solution")
+        best.runtime_info = {
+            "time_limit": test_time,
+            "threads": args.threads,
+            "seed": args.seed,
+            "precision_mode": False,
+            "randomize": args.randomize,
+        }
+        save_json_advanced(best, base + ".json")
+        save_png_advanced(best, base + ".png")
         logger.info(
-            "\nSelbsttest abgeschlossen: Status=%s, ρ=%.4f", sol.status, sol.rho
+            "Selbsttest abgeschlossen: Status=%s, ρ=%.4f", best.status, best.rho
         )
-        logger.info(
-            "Raumfläche: %d, Korridorfläche: %d", sol.room_area, sol.corridor_area
-        )
-        logger.info("Nutzungsrate: %.2f%%", sol.utilization * 100)
         return
 
     # Mehrfachläufe
@@ -1933,6 +1999,7 @@ def main(argv: List[str]) -> None:
             args.seed + run,
             args.precision_mode,
             args.log,
+            args.randomize,
             args.rho_lo,
             args.rho_hi,
             args.tolerance,
@@ -1990,6 +2057,13 @@ def main(argv: List[str]) -> None:
 
         save_png_advanced(best_solution, base_path + ".png")
 
+        best_solution.runtime_info = {
+            "time_limit": args.time,
+            "threads": args.threads,
+            "seed": best_solution.solver_parameters.get("random_seed"),
+            "precision_mode": args.precision_mode,
+            "randomize": args.randomize,
+        }
         save_json_advanced(best_solution, base_path + ".json")
 
         # Detaillierte Analyse
