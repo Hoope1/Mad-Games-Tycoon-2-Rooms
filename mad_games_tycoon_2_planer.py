@@ -32,8 +32,10 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import sys
+import threading
 import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
@@ -114,6 +116,136 @@ BALANCE_TOLERANCE = 3
 COMPACT_BONUS_VALUE = 500
 
 logger = logging.getLogger(__name__)
+
+
+class NdjsonLogger:
+    """Schreibt strukturierte Log-Ereignisse im NDJSON-Format."""
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+        self.file: Optional[Any] = None
+        if path:
+            try:
+                self.file = open(path, "w", encoding="utf-8")
+            except OSError:
+                logger.warning("Fortschrittsdatei %s nicht schreibbar", path)
+                self.file = None
+
+    def write(self, event: Dict[str, Any]) -> None:
+        if self.file is None:
+            return
+        json.dump(event, self.file, ensure_ascii=False)
+        self.file.write("\n")
+        self.file.flush()
+
+    def close(self) -> None:
+        if self.file is not None:
+            self.file.close()
+
+
+class ProgressPrinter(cp_model.CpSolverSolutionCallback):
+    """Live-Ausgabe des Solvers mit optionalem NDJSON-Log."""
+
+    def __init__(
+        self,
+        solver: cp_model.CpSolver,
+        interval: float,
+        logger_json: Optional[NdjsonLogger],
+        params: Dict[str, Any],
+    ) -> None:
+        super().__init__()
+        self.solver = solver
+        self.interval = max(0.1, interval)
+        self.json = logger_json
+        self.params = params
+        self.start = time.time()
+        self.last = self.start
+        self.best: Optional[int] = None
+        self.solutions = 0
+        self._stop = False
+        self.json and self.json.write(
+            {"event": "solver_start", "params": params, "t": 0.0}
+        )
+
+    def on_solution_callback(self) -> None:
+        obj = int(self.ObjectiveValue())
+        if self.best is None or obj > self.best:
+            self.best = obj
+            self.solutions += 1
+            self._log(False)
+
+    def _log(self, heartbeat: bool) -> None:
+        t = self.WallTime()
+        bound = self.BestObjectiveBound()
+        gap = (
+            abs(bound - self.best) / max(1.0, abs(self.best))
+            if self.best is not None
+            else float("nan")
+        )
+        if heartbeat:
+            msg = (
+                f"[CP-SAT] t={t:.1f}s no-new-solution bound={int(bound):_} gap={gap*100:.1f}% "
+                f"sols={self.solutions}"
+            )
+            event = {
+                "event": "heartbeat",
+                "t": t,
+                "bound": bound,
+                "gap": gap,
+                "solutions": self.solutions,
+            }
+        else:
+            msg = (
+                f"[CP-SAT] t={t:.1f}s obj={int(self.best):_} bound={int(bound):_} "
+                f"gap={gap*100:.1f}% sols={self.solutions}"
+            )
+            if self.solutions == 1:
+                msg += (
+                    f" (threads={self.params['threads']}, seed={self.params['seed']}, "
+                    f"randomize={self.params['randomize']}, precision_mode={self.params['precision_mode']})"
+                )
+            event = {
+                "event": "incumbent",
+                "t": t,
+                "objective": self.best,
+                "bound": bound,
+                "gap": gap,
+                "solutions": self.solutions,
+            }
+        print(msg)
+        self.json and self.json.write(event)
+        self.last = time.time()
+
+    def __call__(self) -> None:  # type: ignore[override]
+        super().__call__()
+
+    def start_heartbeat(self) -> None:
+        while not self._stop:
+            time.sleep(self.interval)
+            if time.time() - self.last >= self.interval:
+                self._log(True)
+
+    def stop(self, status: str) -> None:
+        self._stop = True
+        bound = self.solver.BestObjectiveBound()
+        obj = self.best if self.best is not None else 0
+        gap = (
+            abs(bound - obj) / max(1.0, abs(obj))
+            if self.best is not None
+            else float("nan")
+        )
+        t = self.solver.WallTime()
+        self.json and self.json.write(
+            {
+                "event": "solver_end",
+                "status": status,
+                "t": t,
+                "objective": obj,
+                "bound": bound,
+                "gap": gap,
+                "solutions": self.solutions,
+            }
+        )
 
 
 # ======================= Zielfunktions-Gewichte =======================
@@ -495,6 +627,8 @@ def build_and_solve_cp(
     precision_mode: bool = False,
     log_progress: bool = False,
     randomize: bool = False,
+    progress_interval: float = 2.0,
+    progress_logger: Optional[NdjsonLogger] = None,
 ) -> CPSolution:
     """
 
@@ -517,6 +651,10 @@ def build_and_solve_cp(
         log_progress: Loggt den Lösungsfortschritt
 
         randomize: Aktiviert Zufallssuche im Solver
+
+        progress_interval: Zeitintervall für Heartbeats
+
+        progress_logger: Gemeinsamer NDJSON-Logger
 
 
 
@@ -1063,11 +1201,27 @@ def build_and_solve_cp(
 
     t0 = time.time()
 
-    status = solver.Solve(model)
+    callback: Optional[ProgressPrinter] = None
+    hb: Optional[threading.Thread] = None
+    if log_progress:
+        params = {
+            "threads": threads,
+            "seed": seed,
+            "randomize": randomize,
+            "precision_mode": precision_mode,
+        }
+        callback = ProgressPrinter(solver, progress_interval, progress_logger, params)
+        hb = threading.Thread(target=callback.start_heartbeat, daemon=True)
+        hb.start()
+        status = solver.SolveWithSolutionCallback(model, callback)
+        status_name = solver.StatusName(status)
+        callback.stop(status_name)
+        hb.join()
+    else:
+        status = solver.Solve(model)
+        status_name = solver.StatusName(status)
 
     t1 = time.time()
-
-    status_name = solver.StatusName(status)
 
     # Ergebnis extrahieren
 
@@ -1154,12 +1308,34 @@ def build_and_solve_cp(
         )
 
     eff_score = pref_count / R if R > 0 else 0.0
+    bound = solver.BestObjectiveBound()
+    gap = (
+        abs(bound - objective) / max(1.0, abs(objective))
+        if status_name not in ("INFEASIBLE", "MODEL_INVALID")
+        else float("nan")
+    )
     solver_params = {
         "max_time_s": solver.parameters.max_time_in_seconds,
         "random_seed": solver.parameters.random_seed,
         "num_search_workers": solver.parameters.num_search_workers,
         "randomize_search": solver.parameters.randomize_search,
+        "best_bound": bound,
+        "best_gap": gap,
     }
+
+    logger.info(
+        "[CP-SAT] END status=%s obj=%s bound=%s gap=%s rho=%.4f util=%.3f "
+        "room_area=%d corridor_area=%d time=%.1fs",
+        status_name,
+        f"{objective:_}",
+        f"{int(bound):_}",
+        f"{gap*100:.1f}%" if not math.isnan(gap) else "NA",
+        rho_target if rho_target is not None else util,
+        util,
+        int(r_area),
+        int(c_area),
+        t1 - t0,
+    )
 
     return CPSolution(
         status=status_name,
@@ -1187,6 +1363,8 @@ def search_max_rho_advanced(
     precision_mode: bool,
     log_progress: bool,
     randomize: bool,
+    progress_interval: float,
+    progress_logger: Optional[NdjsonLogger] = None,
     rho_lo: float = 0.40,
     rho_hi: float = 0.70,
     tol: float = 5e-4,
@@ -1214,30 +1392,56 @@ def search_max_rho_advanced(
     stage2_time = time_limit - stage1_time
 
     logger.info("[ρ-Suche] Stufe 1: Exploration (%.1fs)", stage1_time)
+    progress_logger and progress_logger.write(
+        {"event": "stage_start", "stage": 1, "t": 0.0}
+    )
 
     test_points = [rho_lo + i * (rho_hi - rho_lo) / 3.0 for i in range(4)]
 
     feasible_points = []
 
+    t_stage1 = time.time()
+
     # Grobe Exploration an Testpunkten
 
     for rho in test_points:
 
+        t_pt = time.time()
         sol = build_and_solve_cp(
-            stage1_time / 4, threads, seed, rho, False, log_progress, randomize
+            stage1_time / 4,
+            threads,
+            seed,
+            rho,
+            False,
+            log_progress,
+            randomize,
+            progress_interval,
+            progress_logger,
+        )
+        dt = time.time() - t_pt
+        progress_logger and progress_logger.write(
+            {
+                "event": "stage1_point",
+                "rho_target": rho,
+                "status": sol.status,
+                "objective": sol.objective,
+                "util": sol.utilization,
+                "t": dt,
+            }
         )
 
         if sol.status in ("OPTIMAL", "FEASIBLE"):
-
             feasible_points.append((rho, sol))
-
             logger.info(
-                "  ρ=%.3f ✓ util=%.3f obj=%s", rho, sol.utilization, sol.objective
+                "rho=%.3f %s util=%.3f obj=%s t=%.1fs",
+                rho,
+                sol.status,
+                sol.utilization,
+                f"{sol.objective:_}",
+                dt,
             )
-
         else:
-
-            logger.info("  ρ=%.3f ✗", rho)
+            logger.info("rho=%.3f %s t=%.1fs", rho, sol.status, dt)
 
     # Bestimme vielversprechenden Bereich
 
@@ -1252,15 +1456,26 @@ def search_max_rho_advanced(
         best_sol = max(feasible_points, key=lambda x: x[0])[1]
 
     else:
-
         lo = rho_lo
-
         hi = rho_lo + (rho_hi - rho_lo) * 0.5
-
         best_sol = None
+
+    progress_logger and progress_logger.write(
+        {
+            "event": "stage_end",
+            "stage": 1,
+            "best_rho": best_rho if feasible_points else None,
+            "lo": lo,
+            "hi": hi,
+            "t": time.time() - t_stage1,
+        }
+    )
 
     logger.info(
         "[ρ-Suche] Stufe 2: Bisektion [%.4f, %.4f] (%.1fs)", lo, hi, stage2_time
+    )
+    progress_logger and progress_logger.write(
+        {"event": "stage_start", "stage": 2, "lo": lo, "hi": hi, "t": 0.0}
     )
 
     last_infeas = None
@@ -1269,10 +1484,12 @@ def search_max_rho_advanced(
 
     iters = 12
     t_start = time.time()
+    t_stage2 = time.time()
     for k in range(iters):
         if hi - lo < tol:
             break
-        remaining = max(5.0, stage2_time - (time.time() - t_start))
+        elapsed = time.time() - t_start
+        remaining = max(5.0, stage2_time - elapsed)
         per_iter = remaining / (iters - k)
         mid = (lo + hi) / 2.0
         sol = build_and_solve_cp(
@@ -1283,23 +1500,62 @@ def search_max_rho_advanced(
             precision_mode,
             log_progress,
             randomize,
+            progress_interval,
+            progress_logger,
+        )
+        bound = sol.solver_parameters.get("best_bound", 0)
+        gap = sol.solver_parameters.get("best_gap", float("nan"))
+        progress_logger and progress_logger.write(
+            {
+                "event": "bisection_iter",
+                "iter": k + 1,
+                "lo": lo,
+                "mid": mid,
+                "hi": hi,
+                "status": sol.status,
+                "objective": sol.objective,
+                "bound": bound,
+                "gap": gap,
+                "remaining_s": remaining,
+            }
         )
 
         if sol.status in ("OPTIMAL", "FEASIBLE"):
-
             best_sol = sol
-
             lo = mid + tol / 10.0
-
-            logger.info("  Iter %02d: ρ=%.5f ✓ obj=%s", k + 1, mid, sol.objective)
-
+            logger.info(
+                "Iter %02d: lo=%.5f mid=%.5f hi=%.5f %s obj=%s gap=%.2f%% rem=%.1fs",
+                k + 1,
+                lo,
+                mid,
+                hi,
+                sol.status,
+                f"{sol.objective:_}",
+                gap * 100.0,
+                remaining,
+            )
         else:
-
             last_infeas = sol
-
             hi = mid - tol / 10.0
+            logger.info(
+                "Iter %02d: lo=%.5f mid=%.5f hi=%.5f %s rem=%.1fs",
+                k + 1,
+                lo,
+                mid,
+                hi,
+                sol.status,
+                remaining,
+            )
 
-            logger.info("  Iter %02d: ρ=%.5f ✗", k + 1, mid)
+    progress_logger and progress_logger.write(
+        {
+            "event": "stage_end",
+            "stage": 2,
+            "best_rho": lo,
+            "hi": hi,
+            "t": time.time() - t_stage2,
+        }
+    )
 
     # Fallback wenn keine feasible Lösung gefunden
 
@@ -1313,6 +1569,8 @@ def search_max_rho_advanced(
             precision_mode,
             log_progress,
             randomize,
+            progress_interval,
+            progress_logger,
         )
 
     if last_infeas is None:
@@ -1396,6 +1654,36 @@ def validate_solution_advanced(sol: CPSolution) -> Dict[str, bool]:
     checks["all_valid"] = all(checks.values())
 
     return checks
+
+
+def top_adjacency_pairs(sol: CPSolution, limit: int = 5) -> List[Dict[str, Any]]:
+    """Ermittelt die besten Adjazenz-Paare."""
+
+    pairs: List[Dict[str, Any]] = []
+    for i, r1 in enumerate(sol.rooms):
+        for j in range(i + 1, len(sol.rooms)):
+            r2 = sol.rooms[j]
+            g1, g2 = r1["group"], r2["group"]
+            weight = ADJ.get(g1, {}).get(g2, 0) + ADJ.get(g2, {}).get(g1, 0)
+            if weight <= 0:
+                continue
+            dx = abs(r1["door"]["x"] - r2["door"]["x"])
+            dy = abs(r1["door"]["y"] - r2["door"]["y"])
+            d = dx + dy
+            if d <= THRESHOLD_VERY_CLOSE_DOORS:
+                score = weight * 100
+            elif d <= THRESHOLD_CLOSE_DOORS:
+                score = weight * 50
+            else:
+                score = weight * max(0.0, (K_DOOR - d) / K_DOOR * 100.0)
+            pairs.append(
+                {
+                    "rooms": [r1["name"], r2["name"]],
+                    "distance": d,
+                    "score": round(score, 1),
+                }
+            )
+    return sorted(pairs, key=lambda x: -x["score"])[:limit]
 
 
 # ======================= Visualisierung =======================
@@ -1914,6 +2202,26 @@ def main(argv: List[str]) -> None:
     )
 
     parser.add_argument(
+        "--progress_interval",
+        type=float,
+        default=2.0,
+        help="Intervall für Fortschrittsausgaben in Sekunden",
+    )
+
+    parser.add_argument(
+        "--progress_file",
+        type=str,
+        default="",
+        help="Pfad für NDJSON-Fortschrittslog (leer=deaktiviert)",
+    )
+
+    parser.add_argument(
+        "--no_color",
+        action="store_true",
+        help="Deaktiviert farbige Konsolenausgabe",
+    )
+
+    parser.add_argument(
         "--randomize",
         action="store_true",
         help="Zufällige Suchheuristiken aktivieren (sonst deterministischer)",
@@ -1951,6 +2259,8 @@ def main(argv: List[str]) -> None:
     level = logging.INFO if args.log else logging.WARNING
     logging.basicConfig(level=level, format="%(message)s")
 
+    ndjson_logger = NdjsonLogger(args.progress_file) if args.progress_file else None
+
     os.makedirs(args.outdir, exist_ok=True)
 
     logger.info("\n" + "=" * 70)
@@ -1983,14 +2293,18 @@ def main(argv: List[str]) -> None:
                 args.seed + i,
                 rho,
                 False,
-                False,
+                args.log,
                 args.randomize,
+                args.progress_interval,
+                ndjson_logger,
             )
             if sol.status in ("OPTIMAL", "FEASIBLE"):
                 if best is None or sol.objective > best.objective:
                     best = sol
         if best is None:
-            logger.error("Selbsttest fehlgeschlagen: keine Lösung gefunden")
+            logger.error(
+                "Selbsttest fehlgeschlagen: keine Lösung gefunden – ρ-Ziel zu hoch oder Mindestabstände verhindern Packung"
+            )
             return
         validation = validate_solution_advanced(best)
         if not all(validation.values()):
@@ -2026,6 +2340,8 @@ def main(argv: List[str]) -> None:
             args.precision_mode,
             args.log,
             args.randomize,
+            args.progress_interval,
+            ndjson_logger,
             args.rho_lo,
             args.rho_hi,
             args.tolerance,
@@ -2104,6 +2420,16 @@ def main(argv: List[str]) -> None:
 
                 logger.info("  %s %s", "✓" if valid else "✗", check)
 
+            logger.info("\nTop-5 Adjazenzpaare:")
+            for pair in top_adjacency_pairs(best_solution, 5):
+                logger.info(
+                    "  %s-%s: dist=%d score=%.1f",
+                    pair["rooms"][0],
+                    pair["rooms"][1],
+                    pair["distance"],
+                    pair["score"],
+                )
+
             group_counts: Dict[str, int] = {}
 
             for r in best_solution.rooms:
@@ -2127,6 +2453,9 @@ def main(argv: List[str]) -> None:
         if solutions:
 
             logger.error("Letzter Status: %s", solutions[-1].status)
+
+    if ndjson_logger:
+        ndjson_logger.close()
 
 
 if __name__ == "__main__":
