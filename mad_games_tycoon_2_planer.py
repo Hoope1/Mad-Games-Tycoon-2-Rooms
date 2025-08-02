@@ -1129,22 +1129,26 @@ def build_and_solve_cp(
 
             continue
 
-        min_dists = []
+        cand_vars: List[IntVar] = []
 
         for yb in YCAND:
             d = abs_var(
                 model, doory[i], model.NewConstant(yb + 2), GRID_H, f"hdist_{i}_{yb}"
             )
-            min_dists.append(d + 1000 * (1 - z[yb]))
+            # d + 1000*(1 - z[yb]) → erst als IntVar materialisieren
+            cand = model.NewIntVar(0, GRID_H + 1000, f"hdist_cand_{i}_{yb}")
+            model.Add(cand == d + 1000 * (1 - z[yb]))
+            cand_vars.append(cand)
 
-        min_dist = model.NewIntVar(0, 1000, f"min_dist_{i}")
-        model.AddMinEquality(min_dist, min_dists)
+        # Domain groß genug wählen (max ~ GRID_H)
+        min_dist = model.NewIntVar(0, GRID_H + 1000, f"min_dist_{i}")
+        model.AddMinEquality(min_dist, cand_vars)
         cap = int(1500 * mult)
         raw = model.NewIntVar(-10_000, 10_000, f"hraw_{i}")
         model.Add(raw == cap - min_dist * 10)
-        zero = model.NewConstant(0)
+        zero_var = model.NewIntVar(0, 0, f"zero_{i}")  # echte 0-IntVar
         bonus_val = model.NewIntVar(0, cap, f"hbonus_{i}")
-        model.AddMaxEquality(bonus_val, [raw, zero])
+        model.AddMaxEquality(bonus_val, [raw, zero_var])
         horiz_terms.append(bonus_val)
 
     obj += W_HORIZ_PREF * cp_model.LinearExpr.Sum(horiz_terms)
