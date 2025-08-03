@@ -104,6 +104,7 @@ python mad_games_tycoon_2_planer.py --time 3600 --precision_mode --analysis --ou
 | --analysis | deaktiviert | Führt nach der Lösung eine detaillierte Analyse durch und speichert diese in der JSON-Datei. Sehr empfohlen. |
 | --multi_run | 1 | Anzahl der unabhängigen Durchläufe mit unterschiedlichen Seeds. Das Skript wählt am Ende die beste Lösung aus. |
 | --log | deaktiviert | Gibt den detaillierten Suchfortschritt des CP-SAT-Solvers auf der Konsole aus. Nützlich für Debugging. |
+| --corridor_model | "grid-flow" | Auswahl des Korridormodells ("skeleton" = alt). |
 | --rho_lo | 0.20 | Untere Grenze für die Flächennutzungsrate (ρ), die bei der Bisektionssuche getestet wird. |
 | --rho_hi | 0.32 | Obere Grenze für die Flächennutzungsrate (ρ). |
 | --tolerance | 5e-3 | Toleranz für den Abbruch der ρ-Bisektionssuche. |
