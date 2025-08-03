@@ -10,6 +10,10 @@ Die Nebenbedingungen verwenden nun:
 - MAX_BANDS = 4
 - MIN_SPACING = 8
 
+Horizontale Bänder dürfen nur bei y ≥ 40 beginnen und verbinden sich so direkt
+mit dem oberen Eingangskorridor. Türen können entweder am Eingangsstamm oder an
+einem dieser Bänder liegen.
+
 ## Known Issues
 Alle 7 kritischen Fehler behoben (v2.2)
 

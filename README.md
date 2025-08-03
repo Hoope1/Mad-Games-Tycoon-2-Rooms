@@ -13,10 +13,13 @@ Ein hochentwickelter, auf Constraint-Programmierung basierender Optimierungs-Sol
 - Parameters: ρ-Bereich: 0.20-0.35, MIN_SPACING: 5
 - Testing: Neue Testsequenz: --rho_lo 0.20 --rho_hi 0.32
 - Entrance: Fixiert auf x = 56..59, y = 40..49 (Länge 10)
+- Türzugang: Türen liegen am Eingangsstamm oder an einem 4er-Band
 
 ## 🚀 Raumverteilungsoptimierung
 - **Korridor-Optimierung**:
   - Fixierter Eingang (10×4 Felder oben)
+  - Optionale horizontale Bänder (4 Felder breit) schließen oben an; Türen dürfen
+    am Stamm oder an einem Band liegen
 - **Intelligente Band-Verteilung**:
   - Automatische Platzierung in 3 Zonen (unten, mitte, oben)  
 - **Flächennutzungsbonus-System**:  

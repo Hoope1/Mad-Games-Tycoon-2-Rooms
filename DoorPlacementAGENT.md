@@ -10,6 +10,11 @@ Zusätzlich gelten realistische Distanzschwellen:
 - THRESHOLD_CLOSE_DOORS = 8
 - K_DOOR = 150
 
+## Tür-zu-Gang-Regel
+Türen müssen auf eine Gangfläche zeigen. Erlaubt sind der obere Eingangskorridor
+und horizontale 4er-Bänder. Türen sitzen nicht in Ecken und führen niemals in
+einen anderen Raum.
+
 ## Known Issues
 Alle 7 kritischen Fehler behoben (v2.2)
 

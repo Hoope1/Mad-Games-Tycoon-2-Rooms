@@ -15,6 +15,11 @@ um folgende Checks:
 - Dev-Raumgröße zwischen 36 und 80 Feldern
 - Kein Raum größer als 112 Felder
 
+## Korridor-Prüfungen
+- Jede Tür liegt im oberen Eingangskorridor oder auf einem 4 Felder breiten Band
+- Kein Raum überschneidet den Eingangskorridor oder ein Band
+- Jedes Band beginnt bei y ≥ 40 und ist damit mit dem Eingang verbunden
+
 ## Known Issues
 Alle 7 kritischen Fehler behoben (v2.2)
 
