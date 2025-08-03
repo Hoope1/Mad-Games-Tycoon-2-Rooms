@@ -828,6 +828,7 @@ def build_and_solve_cp(
     randomize: bool = False,
     progress_interval: float = 2.0,
     progress_logger: Optional[NdjsonLogger] = None,
+    corridor_model: str = "grid-flow",
 ) -> CPSolution:
     """
 
@@ -855,6 +856,8 @@ def build_and_solve_cp(
 
         progress_logger: Gemeinsamer NDJSON-Logger
 
+        corridor_model: Modellvariante für den Korridor ("skeleton" oder "grid-flow")
+
 
 
     Returns:
@@ -862,6 +865,8 @@ def build_and_solve_cp(
         CPSolution-Objekt mit allen Lösungsergebnissen
 
     """
+    if corridor_model not in {"skeleton", "grid-flow"}:
+        raise ValueError(f"Unbekanntes Korridormodell: {corridor_model}")
 
     model = cp_model.CpModel()
 
@@ -1523,24 +1528,29 @@ def search_max_rho_advanced(
     randomize: bool,
     progress_interval: float,
     progress_logger: Optional[NdjsonLogger] = None,
+    corridor_model: str = "grid-flow",
     rho_lo: float = RHO_LO_DEFAULT,
     rho_hi: float = RHO_HI_DEFAULT,
     tol: float = TOLERANCE_DEFAULT,
 ) -> Tuple[CPSolution, CPSolution]:
-    """
+    """Ermittelt das maximal mögliche ρ mittels zweistufiger Suche.
 
-    Ermittelt das maximal mögliche ρ mittels zweistufiger Suche:
-
-    1. Grobe Exploration des Suchraums
-
-    2. Präzise Bisektion im vielversprechenden Bereich
-
-
+    Args:
+        time_limit: Gesamtzeitlimit in Sekunden.
+        threads: Anzahl verwendeter Threads.
+        seed: Zufallsseed.
+        precision_mode: Aktiviert präzisen Suchmodus.
+        log_progress: Gibt Solver-Logs aus.
+        randomize: Aktiviert zufällige Suche.
+        progress_interval: Intervall für Fortschrittsmeldungen.
+        progress_logger: Gemeinsamer NDJSON-Logger.
+        corridor_model: Modellvariante für den Korridor ("skeleton" oder "grid-flow").
+        rho_lo: Untere Grenze der ρ-Suche.
+        rho_hi: Obere Grenze der ρ-Suche.
+        tol: Toleranz für die Bisektion.
 
     Returns:
-
         Tuple: (Beste gefundene Lösung, Letzte infeasible Lösung)
-
     """
 
     # Zeitverteilung: 40% Exploration, 60% Bisektion
@@ -1575,6 +1585,7 @@ def search_max_rho_advanced(
             randomize,
             progress_interval,
             progress_logger,
+            corridor_model,
         )
         dt = time.time() - t_pt
         progress_logger and progress_logger.write(
@@ -1660,6 +1671,7 @@ def search_max_rho_advanced(
             randomize,
             progress_interval,
             progress_logger,
+            corridor_model,
         )
         bound = sol.solver_parameters.get("best_bound", 0)
         gap = sol.solver_parameters.get("best_gap", float("nan"))
@@ -1729,6 +1741,7 @@ def search_max_rho_advanced(
             randomize,
             progress_interval,
             progress_logger,
+            corridor_model,
         )
 
     if last_infeas is None:
@@ -2424,6 +2437,14 @@ def main(argv: List[str]) -> None:
     )
 
     parser.add_argument(
+        "--corridor_model",
+        type=str,
+        choices=["skeleton", "grid-flow"],
+        default="grid-flow",
+        help="Wählt das Korridormodell (Standard: grid-flow)",
+    )
+
+    parser.add_argument(
         "--weights_json",
         type=str,
         help="Pfad zu einer JSON-Datei, die W_* Gewichte überschreibt",
@@ -2501,6 +2522,7 @@ def main(argv: List[str]) -> None:
                 args.randomize,
                 args.progress_interval,
                 ndjson_logger,
+                args.corridor_model,
             )
             if sol.status in ("OPTIMAL", "FEASIBLE"):
                 if best is None or sol.objective > best.objective:
@@ -2546,6 +2568,7 @@ def main(argv: List[str]) -> None:
             args.randomize,
             args.progress_interval,
             ndjson_logger,
+            args.corridor_model,
             args.rho_lo,
             args.rho_hi,
             args.tolerance,
