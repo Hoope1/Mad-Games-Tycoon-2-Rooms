@@ -13,6 +13,7 @@ Ein hochentwickelter, auf Constraint-Programmierung basierender Optimierungs-Sol
 - Parameters: ρ-Bereich: 0.20-0.35, MIN_SPACING: 5
 - Testing: Neue Testsequenz: --rho_lo 0.20 --rho_hi 0.32
 - Entrance: Fixiert auf x = 56..59, y = 40..49 (Länge 10)
+- Corridor model: Auswahl über `--corridor_model` (Standard `grid-flow`)
 - Türzugang: Türen liegen am Eingangsstamm oder an einem 4er-Band
 
 ## 🚀 Raumverteilungsoptimierung
