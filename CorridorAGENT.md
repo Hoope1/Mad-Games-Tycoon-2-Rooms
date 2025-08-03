@@ -1,10 +1,11 @@
 # CorridorAGENT
 > Version 2.5 Update
 
-## Lockerere Korridorparameter
+## Fixierter Eingangskorridor
 Die Nebenbedingungen verwenden nun:
-- ENTRANCE_MIN_LEN = 15
-- ENTRANCE_MAX_LEN = 35
+- ENTRANCE_MIN_LEN = 10
+- ENTRANCE_MAX_LEN = 10
+- Position: x = 56..59, y = 40..49
 - MIN_BANDS = 2
 - MAX_BANDS = 4
 - MIN_SPACING = 8
@@ -24,6 +25,6 @@ Neue Testsequenz: --rho_lo 0.20 --rho_hi 0.32
 |------------------------------|---------------------------------------|--------------------------|
 | Dynamische Bandverteilung    | 3 Zonen (unten/mitte/oben)            | Gleichmäßige Raumverteilung |
 | Vertikal-Bonus               | 1000 * y_span                         | ↑ Vertikale Ausdehnung |
-| Korridor-Optimierung         | 150% längere Korridore                | ↑ Nutzfläche          |
+| Fixierter Eingang            | 10×4 Felder am oberen Rand           | ↑ Stabilität          |
 
 [Raumoptimierung](#raumoptimierung)

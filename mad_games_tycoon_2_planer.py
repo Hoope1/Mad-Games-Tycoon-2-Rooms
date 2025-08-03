@@ -80,9 +80,9 @@ ENTRANCE_X1, ENTRANCE_W = 56, 4
 
 ENTRANCE_X2 = ENTRANCE_X1 + ENTRANCE_W
 
-ENTRANCE_MIN_LEN = 15  # GEÄNDERT
+ENTRANCE_MIN_LEN = 10  # Feste Länge des Eingangs
 
-ENTRANCE_MAX_LEN = 35  # GEÄNDERT
+ENTRANCE_MAX_LEN = 10  # Feste Länge des Eingangs
 
 
 # Horizontale Bänder
@@ -569,7 +569,8 @@ def add_door_placement_constraints(
     for r in range(R):
         model.Add(doorx[r] >= ENTRANCE_X1).OnlyEnforceIf(d_vert[r])
         model.Add(doorx[r] < ENTRANCE_X2).OnlyEnforceIf(d_vert[r])
-        model.Add(doory[r] < L).OnlyEnforceIf(d_vert[r])
+        model.Add(doory[r] >= GRID_H - L).OnlyEnforceIf(d_vert[r])
+        model.Add(doory[r] < GRID_H).OnlyEnforceIf(d_vert[r])
 
         attach_left = model.NewBoolVar(f"attach_left_{r}")
         attach_right = model.NewBoolVar(f"attach_right_{r}")
@@ -654,10 +655,10 @@ def add_door_placement_constraints(
                 [top_of_band, bot_of_band, z[yb].Not(), intersects_band.Not()]
             )
 
-    for ty in range(ENTRANCE_MAX_LEN):
+    for ty in range(GRID_H - ENTRANCE_MAX_LEN, GRID_H):
         row_active = model.NewBoolVar(f"row_active_{ty}")
-        model.Add(L > ty).OnlyEnforceIf(row_active)
-        model.Add(L <= ty).OnlyEnforceIf(row_active.Not())
+        model.Add(ty >= GRID_H - L).OnlyEnforceIf(row_active)
+        model.Add(ty < GRID_H - L).OnlyEnforceIf(row_active.Not())
 
         for tx in range(ENTRANCE_X1, ENTRANCE_X2):
             v_door_count = model.NewIntVar(0, R, f"vdoor_count_{tx}_{ty}")
@@ -896,7 +897,7 @@ def build_and_solve_cp(
 
     for y in YCAND:
 
-        model.Add(L > y).OnlyEnforceIf(z[y])
+        model.Add(GRID_H - L <= y).OnlyEnforceIf(z[y])
 
     # Bandverteilung über das gesamte Gitter erzwingen
     enforce_band_distribution(model, z, YCAND)
@@ -1747,13 +1748,21 @@ def validate_solution_advanced(sol: CPSolution) -> Dict[str, bool]:
 
     # Türen auf Korridoren
 
-    checks["doors_on_corridors"] = all(
-        (
-            ENTRANCE_X1 <= r["door"]["x"] < ENTRANCE_X2
-            and 0 <= r["door"]["y"] < sol.entrance_len
+    def _door_on_vertical(d: Dict[str, int]) -> bool:
+        """Prüft, ob die Tür im vertikalen Eingang liegt."""
+
+        return (
+            ENTRANCE_X1 <= d["x"] < ENTRANCE_X2
+            and GRID_H - sol.entrance_len <= d["y"] < GRID_H
         )
-        or any(yb <= r["door"]["y"] < yb + 4 for yb in sol.horiz_y)
-        for r in sol.rooms
+
+    def _door_on_any_band(d: Dict[str, int]) -> bool:
+        """Prüft, ob die Tür in einem horizontalen Band liegt."""
+
+        return any(yb <= d["y"] < yb + 4 for yb in sol.horiz_y)
+
+    checks["doors_on_corridors"] = all(
+        _door_on_vertical(r["door"]) or _door_on_any_band(r["door"]) for r in sol.rooms
     )
 
     # Keine Überlappungen
@@ -1779,10 +1788,11 @@ def validate_solution_advanced(sol: CPSolution) -> Dict[str, bool]:
     # Räume dürfen keine Korridorkacheln belegen
     checks["rooms_off_corridors"] = True
     for r in sol.rooms:
-        if r["y"] < sol.entrance_len:
-            if not (r["x"] + r["w"] <= ENTRANCE_X1 or r["x"] >= ENTRANCE_X2):
-                checks["rooms_off_corridors"] = False
-                break
+        if r["y"] + r["h"] > GRID_H - sol.entrance_len and not (
+            r["x"] + r["w"] <= ENTRANCE_X1 or r["x"] >= ENTRANCE_X2
+        ):
+            checks["rooms_off_corridors"] = False
+            break
         for yb in sol.horiz_y:
             if r["y"] < yb + 4 and r["y"] + r["h"] > yb:
                 checks["rooms_off_corridors"] = False
@@ -1792,7 +1802,9 @@ def validate_solution_advanced(sol: CPSolution) -> Dict[str, bool]:
 
     # Korridorverbindungen
 
-    checks["band_connection"] = all(yb < sol.entrance_len for yb in sol.horiz_y)
+    checks["band_connection"] = all(
+        yb >= GRID_H - sol.entrance_len for yb in sol.horiz_y
+    )
 
     # Bandabstände
 
@@ -1912,7 +1924,7 @@ def save_png_advanced(sol: CPSolution, path: str) -> None:
 
     ax.add_patch(
         Rectangle(
-            (ENTRANCE_X1, 0),
+            (ENTRANCE_X1, GRID_H - sol.entrance_len),
             ENTRANCE_W,
             sol.entrance_len,
             facecolor="#aaccff",
@@ -1924,7 +1936,7 @@ def save_png_advanced(sol: CPSolution, path: str) -> None:
 
     ax.text(
         ENTRANCE_X1 + ENTRANCE_W / 2,
-        sol.entrance_len / 2,
+        GRID_H - sol.entrance_len / 2,
         "HAUPTKORRIDOR",
         ha="center",
         va="center",
@@ -1961,7 +1973,7 @@ def save_png_advanced(sol: CPSolution, path: str) -> None:
 
         # Verbindung zum Hauptkorridor
 
-        if y < sol.entrance_len:
+        if y >= GRID_H - sol.entrance_len:
 
             ax.plot([ENTRANCE_X1, 0], [y, y], "g--", linewidth=1.5, alpha=0.6)
 
