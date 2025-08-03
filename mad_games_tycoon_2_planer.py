@@ -559,7 +559,7 @@ def add_door_placement_constraints(
     z: Dict[int, BoolVar],
     L: IntVar,
 ) -> None:
-    """Fügt Tür- und Gang-Constraints hinzu."""
+    """Fügt Constraints für Eingangsstamm und horizontale Bänder hinzu."""
 
     d_vert: List[BoolVar] = [model.NewBoolVar(f"dvert_{r}") for r in range(R)]
     d_band: List[List[BoolVar]] = [
@@ -1788,13 +1788,12 @@ def validate_solution_advanced(sol: CPSolution) -> Dict[str, bool]:
     # Räume dürfen keine Korridorkacheln belegen
     checks["rooms_off_corridors"] = True
     for r in sol.rooms:
-        if r["y"] + r["h"] > GRID_H - sol.entrance_len and not (
-            r["x"] + r["w"] <= ENTRANCE_X1 or r["x"] >= ENTRANCE_X2
-        ):
-            checks["rooms_off_corridors"] = False
-            break
+        if not (r["x"] + r["w"] <= ENTRANCE_X1 or r["x"] >= ENTRANCE_X2):
+            if r["y"] < GRID_H and (r["y"] + r["h"] > GRID_H - sol.entrance_len):
+                checks["rooms_off_corridors"] = False
+                break
         for yb in sol.horiz_y:
-            if r["y"] < yb + 4 and r["y"] + r["h"] > yb:
+            if r["y"] < yb + 4 and (r["y"] + r["h"]) > yb:
                 checks["rooms_off_corridors"] = False
                 break
         if not checks["rooms_off_corridors"]:
