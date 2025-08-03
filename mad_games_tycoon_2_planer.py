@@ -80,9 +80,9 @@ ENTRANCE_X1, ENTRANCE_W = 56, 4
 
 ENTRANCE_X2 = ENTRANCE_X1 + ENTRANCE_W
 
-ENTRANCE_MIN_LEN = 10  # Feste Länge des Eingangs
+ENTRANCE_MIN_LEN = 10  # Feste Länge des Eingangs (oben, y = 40..49)
 
-ENTRANCE_MAX_LEN = 10  # Feste Länge des Eingangs
+ENTRANCE_MAX_LEN = 10  # Feste Länge des Eingangs (oben, y = 40..49)
 
 
 # Horizontale Bänder
