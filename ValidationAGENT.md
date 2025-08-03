@@ -30,6 +30,6 @@ Neue Testsequenz: --rho_lo 0.20 --rho_hi 0.32
 |------------------------------|---------------------------------------|--------------------------|
 | Dynamische Bandverteilung    | 3 Zonen (unten/mitte/oben)            | Gleichmäßige Raumverteilung |
 | Vertikal-Bonus               | 1000 * y_span                         | ↑ Vertikale Ausdehnung |
-| Korridor-Optimierung         | 150% längere Korridore                | ↑ Nutzfläche          |
+| Fixierter Eingang            | 10×4 Felder am oberen Rand           | ↑ Stabilität          |
 
 [Raumoptimierung](#raumoptimierung)
